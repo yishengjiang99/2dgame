@@ -13,6 +13,12 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   font-family: "Georgia", "Times New Roman", serif;
@@ -22,8 +28,9 @@ body {
 
 .app {
   max-width: 840px;
+  height: 100%;
   margin: 0 auto;
-  padding: 24px;
+  padding: 16px;
   display: grid;
   gap: 20px;
 }
@@ -71,8 +78,9 @@ body {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 16px;
+  padding: 12px;
   position: relative;
+  display: grid;
 }
 
 #board {

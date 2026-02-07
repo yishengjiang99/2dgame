@@ -9,7 +9,8 @@ const controlButtons = document.querySelectorAll("[data-dir]");
 
 const ctx = canvas.getContext("2d");
 const gridSize = 20;
-const cellSize = canvas.width / gridSize;
+let cellSize = canvas.width / gridSize;
+let touchStart = null;
 
 let state = createInitialState({ gridSize });
 let running = true;
@@ -51,6 +52,48 @@ function handleKey(event) {
   if (key === "arrowright" || key === "d") handleDirection("right");
   if (key === " ") togglePause();
   if (key === "r") reset();
+}
+
+function handleTouchStart(event) {
+  if (event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  touchStart = { x: touch.clientX, y: touch.clientY };
+}
+
+function handleTouchMove(event) {
+  if (!touchStart) return;
+  if (event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  const dx = touch.clientX - touchStart.x;
+  const dy = touch.clientY - touchStart.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance < 24) return;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    handleDirection(dx > 0 ? "right" : "left");
+  } else {
+    handleDirection(dy > 0 ? "down" : "up");
+  }
+  touchStart = null;
+}
+
+function handleTouchEnd() {
+  touchStart = null;
+}
+
+function resizeCanvas() {
+  const vv = window.visualViewport;
+  const header = document.querySelector(".top");
+  const controls = document.querySelector(".controls");
+  const padding = 24;
+  const headerH = header ? header.getBoundingClientRect().height : 0;
+  const controlsH = controls ? controls.getBoundingClientRect().height : 0;
+  const available =
+    (vv ? vv.height : window.innerHeight) - headerH - controlsH - padding;
+  const side = Math.max(200, Math.floor(available));
+  const size = Math.min(side, Math.floor(window.innerWidth - 32));
+  canvas.width = size;
+  canvas.height = size;
+  cellSize = canvas.width / gridSize;
 }
 
 function renderGrid() {
@@ -122,6 +165,15 @@ pauseBtn.addEventListener("click", togglePause);
 controlButtons.forEach((btn) =>
   btn.addEventListener("click", () => handleDirection(btn.dataset.dir))
 );
+window.addEventListener("resize", resizeCanvas);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", resizeCanvas);
+}
+canvas.addEventListener("touchstart", handleTouchStart, { passive: true });
+canvas.addEventListener("touchmove", handleTouchMove, { passive: true });
+canvas.addEventListener("touchend", handleTouchEnd);
+canvas.addEventListener("touchcancel", handleTouchEnd);
 
+resizeCanvas();
 reset();
 requestAnimationFrame(loop);
