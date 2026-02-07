@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Snake</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="top">
+        <div>
+          <h1>Snake</h1>
+          <p class="sub">Classic grid movement. Eat to grow. Don’t hit walls or yourself.</p>
+        </div>
+        <div class="score">
+          <span>Score</span>
+          <strong id="score">0</strong>
+        </div>
+      </header>
+
+      <section class="board-wrap">
+        <canvas id="board" width="400" height="400" aria-label="Snake game board"></canvas>
+        <div class="status" id="status"></div>
+      </section>
+
+      <section class="controls">
+        <div class="row">
+          <button id="restart">Restart</button>
+          <button id="pause">Pause</button>
+        </div>
+        <div class="pad" aria-label="On-screen controls">
+          <button data-dir="up">▲</button>
+          <div class="row">
+            <button data-dir="left">◀</button>
+            <button data-dir="down">▼</button>
+            <button data-dir="right">▶</button>
+          </div>
+        </div>
+        <p class="help">Controls: Arrow keys / WASD. Space to pause. R to restart.</p>
+      </section>
+    </main>
+
+    <script type="module" src="game.js"></script>
+  </body>
+</html>

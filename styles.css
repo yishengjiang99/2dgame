@@ -1,0 +1,160 @@
+:root {
+  --bg: #f3f1ea;
+  --ink: #1d1c19;
+  --muted: #6a665c;
+  --panel: #ffffff;
+  --border: #d6d2c7;
+  --snake: #1f5d3a;
+  --snake-head: #153d26;
+  --food: #c0392b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Georgia", "Times New Roman", serif;
+  color: var(--ink);
+  background: radial-gradient(circle at top, #fff7e7, var(--bg));
+}
+
+.app {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  gap: 20px;
+}
+
+.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.top h1 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.sub {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.score {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  min-width: 120px;
+  text-align: center;
+  border-radius: 8px;
+}
+
+.score span {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.score strong {
+  font-size: 28px;
+  display: block;
+}
+
+.board-wrap {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  position: relative;
+}
+
+#board {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--border);
+  background: #f9f7f2;
+}
+
+.status {
+  position: absolute;
+  inset: 16px;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  font-size: 18px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.status.visible {
+  opacity: 1;
+}
+
+.controls {
+  display: grid;
+  gap: 12px;
+}
+
+.controls .row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+button {
+  font-family: inherit;
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.pad {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.pad .row {
+  justify-content: center;
+}
+
+.pad button {
+  width: 56px;
+  height: 40px;
+}
+
+.help {
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .score {
+    align-self: flex-start;
+  }
+}
