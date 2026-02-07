@@ -1,0 +1,166 @@
+:root {
+  --sky: #a7c4ff;
+  --panel: rgba(12, 16, 22, 0.72);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --ink: #f5f5f5;
+  --muted: #b7c1d9;
+  --accent: #f5b042;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
+  background: radial-gradient(circle at top, #d9ecff, var(--sky));
+  overflow: hidden;
+}
+
+#viewport {
+  position: fixed;
+  inset: 0;
+}
+
+.hud {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+  color: var(--ink);
+  z-index: 2;
+}
+
+.hud h1 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.hud p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.hud-controls {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  min-width: 240px;
+}
+
+.hud-controls label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.hud-controls input[type="file"],
+.hud-controls input[type="text"] {
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--ink);
+}
+
+.hud-controls button {
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.hud-controls button:hover {
+  border-color: var(--accent);
+}
+
+.url {
+  grid-template-columns: 1fr auto;
+}
+
+.url input {
+  width: 100%;
+}
+
+.altitudes {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.altitudes button.active {
+  background: var(--accent);
+  color: #1a1a1a;
+}
+
+.status {
+  position: fixed;
+  inset: auto 16px 16px auto;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 12px;
+  z-index: 2;
+}
+
+.crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.crosshair::before,
+.crosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.crosshair::before {
+  width: 2px;
+  height: 18px;
+  left: 8px;
+  top: 0;
+}
+
+.crosshair::after {
+  width: 18px;
+  height: 2px;
+  top: 8px;
+  left: 0;
+}
+
+@media (max-width: 820px) {
+  .hud {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hud-controls {
+    width: 100%;
+  }
+}

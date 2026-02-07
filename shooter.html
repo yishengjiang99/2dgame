@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Terrain Shooter</title>
+    <link rel="stylesheet" href="shooter.css" />
+  </head>
+  <body>
+    <div class="hud">
+      <div>
+        <h1>Terrain Shooter</h1>
+        <p>WASD to move. Click to lock pointer. Left-drag: movement direction. Right-drag: camera. Both mouse buttons: forward. 1-5: altitude.</p>
+      </div>
+      <div class="hud-controls">
+        <label class="file">
+          Heightmap
+          <input id="heightmap" type="file" accept="image/*" />
+        </label>
+        <label class="url">
+          URL
+          <input id="heightmap-url" type="text" placeholder="https://..." />
+          <button id="load-url" type="button">Load</button>
+        </label>
+        <div class="altitudes" aria-label="Altitude presets">
+          <button data-alt="2">Alt 1</button>
+          <button data-alt="6">Alt 2</button>
+          <button data-alt="12">Alt 3</button>
+          <button data-alt="24">Alt 4</button>
+          <button data-alt="40">Alt 5</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="viewport"></div>
+    <div class="crosshair" aria-hidden="true"></div>
+    <div class="status" id="status">Click to enter</div>
+
+    <script type="module" src="shooter.js"></script>
+  </body>
+</html>

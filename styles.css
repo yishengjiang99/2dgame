@@ -42,6 +42,26 @@ body {
   gap: 16px;
 }
 
+.top-right {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.nav-link:hover {
+  background: #f1efe8;
+}
+
 .top h1 {
   margin: 0;
   font-size: 32px;
