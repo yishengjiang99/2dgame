@@ -6,24 +6,28 @@ const heightmapUrlInput = document.getElementById("heightmap-url");
 const loadUrlButton = document.getElementById("load-url");
 const statusEl = document.getElementById("status");
 const altitudeButtons = Array.from(document.querySelectorAll(".altitudes button"));
+const inventoryEl = document.getElementById("inventory");
+const actionBarEl = document.getElementById("action-bar");
 
 const state = {
   width: 256,
   height: 256,
   data: new Float32Array(256 * 256),
-  size: 520,
+  size: 255,
   heightScale: 72,
   altitudeTarget: 6,
   altitude: 6,
-  locked: false,
   yaw: 0,
   pitch: 0,
   moveYaw: 0,
   velocity: new THREE.Vector3(),
   move: { forward: 0, right: 0, boost: false },
-  mouse: { left: false, right: false, forward: false },
+  turn: { left: false, right: false },
+  mouse: { left: false, right: false, both: false },
   jumpVel: 0,
   jumpOffset: 0,
+  activeSlot: 0,
+  selectedItem: null,
 };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -44,6 +48,36 @@ sun.position.set(80, 140, 40);
 scene.add(sun);
 
 let terrain = null;
+let house = null;
+let houseDoorPivot = null;
+let houseDoorMesh = null;
+let houseDoorOpen = false;
+const placedBlocks = new Map();
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2(0, 0);
+
+const blockCatalog = [
+  { id: "grass", label: "Grass", color: 0x5b8c42 },
+  { id: "stone", label: "Stone", color: 0x888888 },
+  { id: "sand", label: "Sand", color: 0xd8c27a },
+  { id: "lava", label: "Lava", color: 0xd94b2b },
+  { id: "ice", label: "Ice", color: 0x8fd3ff },
+  { id: "wood", label: "Wood", color: 0x8b5a2b },
+  { id: "metal", label: "Metal", color: 0x9aa3b2 },
+  { id: "brick", label: "Brick", color: 0xb5524a },
+];
+
+const actionBar = Array.from({ length: 5 }, () => null);
+const blockMeshes = new Map();
+
+const houseConfig = {
+  x: 8,
+  z: 8,
+  size: 30,
+  wallHeight: 12,
+  doorWidth: 6,
+  doorHeight: 9,
+};
 
 function createDefaultHeightmap() {
   const size = 256;
@@ -95,6 +129,7 @@ function applyHeightmap(image) {
     state.data[i] = gray;
   }
 
+  state.size = Math.max(state.width - 1, state.height - 1);
   buildTerrain();
 }
 
@@ -104,37 +139,54 @@ function buildTerrain() {
     terrain.geometry.dispose();
     terrain.material.dispose();
   }
-
-  const segmentsX = state.width - 1;
-  const segmentsZ = state.height - 1;
-  const geometry = new THREE.PlaneGeometry(state.size, state.size, segmentsX, segmentsZ);
-  geometry.rotateX(-Math.PI / 2);
-  const vertices = geometry.attributes.position;
-
-  for (let i = 0; i < vertices.count; i += 1) {
-    const ix = i % state.width;
-    const iz = Math.floor(i / state.width);
-    const heightValue = state.data[iz * state.width + ix];
-    const y = heightValue * state.heightScale;
-    vertices.setY(i, y);
+  if (house) {
+    scene.remove(house);
+    house.traverse((child) => {
+      if (child.isMesh) {
+        child.geometry.dispose();
+        child.material.dispose();
+      }
+    });
+    house = null;
+    houseDoorPivot = null;
+    houseDoorMesh = null;
+    houseDoorOpen = false;
   }
 
-  geometry.computeVertexNormals();
+  flattenTerrainForHouse();
 
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
   const material = new THREE.MeshStandardMaterial({
     color: 0x496c3f,
-    roughness: 0.8,
-    metalness: 0.1,
+    roughness: 0.85,
+    metalness: 0.05,
   });
 
-  terrain = new THREE.Mesh(geometry, material);
-  terrain.receiveShadow = true;
+  const count = state.width * state.height;
+  terrain = new THREE.InstancedMesh(geometry, material, count);
+  const dummy = new THREE.Object3D();
+  const halfX = (state.width - 1) / 2;
+  const halfZ = (state.height - 1) / 2;
+  let i = 0;
+  for (let z = 0; z < state.height; z += 1) {
+    for (let x = 0; x < state.width; x += 1) {
+      const heightValue = state.data[z * state.width + x];
+      const y = heightValue * state.heightScale;
+      dummy.position.set(x - halfX, y + 0.5, z - halfZ);
+      dummy.updateMatrix();
+      terrain.setMatrixAt(i, dummy.matrix);
+      i += 1;
+    }
+  }
+  terrain.instanceMatrix.needsUpdate = true;
   scene.add(terrain);
 
   camera.position.set(0, state.heightScale + state.altitude, 0);
   state.yaw = 0;
   state.pitch = -0.2;
   state.moveYaw = 0;
+  buildHouse();
+  clearPlacedBlocks();
 }
 
 function sampleHeight(x, z) {
@@ -173,10 +225,10 @@ function setAltitude(target) {
 }
 
 function handlePointerMove(event) {
-  if (!state.locked) return;
   const sensitivity = 0.0023;
   if (state.mouse.left) {
     state.moveYaw -= event.movementX * sensitivity;
+    state.yaw = state.moveYaw;
   }
   if (state.mouse.right) {
     state.yaw -= event.movementX * sensitivity;
@@ -187,8 +239,19 @@ function handlePointerMove(event) {
 
 function updateCamera(delta) {
   const speed = state.move.boost ? 60 : 36;
-  const forward = Math.max(-1, Math.min(1, state.move.forward + (state.mouse.forward ? 1 : 0)));
+  const forward = Math.max(-1, Math.min(1, state.move.forward + (state.mouse.both ? -1 : 0)));
   const right = state.move.right;
+  const turnRate = 2.6;
+  if (state.turn.left) {
+    const deltaYaw = turnRate * delta;
+    state.moveYaw += deltaYaw;
+    state.yaw += deltaYaw;
+  }
+  if (state.turn.right) {
+    const deltaYaw = -turnRate * delta;
+    state.moveYaw += deltaYaw;
+    state.yaw += deltaYaw;
+  }
 
   const dir = new THREE.Vector3(
     Math.sin(state.moveYaw) * forward + Math.cos(state.moveYaw) * right,
@@ -254,10 +317,16 @@ function handleKey(event, active) {
       break;
     case "KeyA":
     case "ArrowLeft":
-      state.move.right = active ? -1 : state.move.right === -1 ? 0 : state.move.right;
+      state.turn.left = active;
       break;
     case "KeyD":
     case "ArrowRight":
+      state.turn.right = active;
+      break;
+    case "KeyQ":
+      state.move.right = active ? -1 : state.move.right === -1 ? 0 : state.move.right;
+      break;
+    case "KeyE":
       state.move.right = active ? 1 : state.move.right === 1 ? 0 : state.move.right;
       break;
     case "ShiftLeft":
@@ -265,19 +334,19 @@ function handleKey(event, active) {
       state.move.boost = active;
       break;
     case "Digit1":
-      if (active) setAltitude(2);
+      if (active) placeFromSlot(0);
       break;
     case "Digit2":
-      if (active) setAltitude(6);
+      if (active) placeFromSlot(1);
       break;
     case "Digit3":
-      if (active) setAltitude(12);
+      if (active) placeFromSlot(2);
       break;
     case "Digit4":
-      if (active) setAltitude(24);
+      if (active) placeFromSlot(3);
       break;
     case "Digit5":
-      if (active) setAltitude(40);
+      if (active) placeFromSlot(4);
       break;
     case "Space":
       if (active && state.jumpOffset === 0) {
@@ -308,20 +377,11 @@ function loadHeightmapUrl(url) {
 }
 
 function setupPointerLock() {
-  renderer.domElement.addEventListener("click", () => {
-    renderer.domElement.requestPointerLock();
-  });
-
-  document.addEventListener("pointerlockchange", () => {
-    state.locked = document.pointerLockElement === renderer.domElement;
-    statusEl.textContent = state.locked ? "Locked" : "Click to enter";
-  });
-
   document.addEventListener("mousemove", handlePointerMove);
 }
 
 function updateMouseForward() {
-  state.mouse.forward = state.mouse.left && state.mouse.right;
+  state.mouse.both = state.mouse.left && state.mouse.right;
 }
 
 renderer.domElement.addEventListener("mousedown", (event) => {
@@ -339,6 +399,255 @@ renderer.domElement.addEventListener("mouseup", (event) => {
 renderer.domElement.addEventListener("contextmenu", (event) => {
   event.preventDefault();
 });
+
+renderer.domElement.addEventListener("pointerdown", (event) => {
+  if (event.button === 0) {
+    raycaster.setFromCamera(pointer, camera);
+    if (houseDoorMesh) {
+      const hits = raycaster.intersectObject(houseDoorMesh, false);
+      if (hits.length) {
+        toggleHouseDoor();
+        return;
+      }
+    }
+  }
+  if (event.button === 2) {
+    placeBlock();
+  }
+});
+
+renderer.domElement.addEventListener("mousemove", (event) => {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+});
+
+function buildInventory() {
+  inventoryEl.innerHTML = "";
+  actionBarEl.innerHTML = "";
+
+  if (!state.selectedItem && blockCatalog.length) {
+    state.selectedItem = blockCatalog[0].id;
+  }
+
+  blockCatalog.forEach((block) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "inventory-item";
+    item.textContent = block.label;
+    item.style.borderColor = `#${block.color.toString(16).padStart(6, "0")}`;
+    item.addEventListener("click", () => {
+      setSelectedItem(block.id);
+    });
+    if (state.selectedItem === block.id) item.classList.add("active");
+    inventoryEl.appendChild(item);
+  });
+
+  renderActionBar();
+}
+
+function renderActionBar() {
+  actionBarEl.innerHTML = "";
+  actionBar.forEach((blockId, index) => {
+    const slot = document.createElement("button");
+    slot.type = "button";
+    slot.className = "action-slot";
+    const block = blockCatalog.find((b) => b.id === blockId);
+    slot.textContent = block ? `${index + 1}: ${block.label}` : `${index + 1}: Empty`;
+    if (index === state.activeSlot) slot.classList.add("active");
+    slot.addEventListener("click", () => assignToSlot(index));
+    actionBarEl.appendChild(slot);
+  });
+}
+
+function setActiveSlot(index) {
+  state.activeSlot = index;
+  renderActionBar();
+}
+
+function setSelectedItem(blockId) {
+  state.selectedItem = blockId;
+  buildInventory();
+}
+
+function assignToSlot(index) {
+  if (!state.selectedItem) return;
+  actionBar[index] = state.selectedItem;
+  state.activeSlot = index;
+  renderActionBar();
+}
+
+function ensureBlockMesh(blockId) {
+  if (blockMeshes.has(blockId)) return blockMeshes.get(blockId);
+  const block = blockCatalog.find((b) => b.id === blockId);
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const material = new THREE.MeshStandardMaterial({ color: block.color, roughness: 0.7, metalness: 0.1 });
+  const mesh = new THREE.Mesh(geometry, material);
+  blockMeshes.set(blockId, mesh);
+  return mesh;
+}
+
+function clearPlacedBlocks() {
+  placedBlocks.forEach((mesh) => {
+    scene.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+  });
+  placedBlocks.clear();
+}
+
+function flattenTerrainForHouse() {
+  const halfX = (state.width - 1) / 2;
+  const halfZ = (state.height - 1) / 2;
+  const centerHeight = sampleHeight(houseConfig.x, houseConfig.z);
+  const flatValue = centerHeight / state.heightScale;
+  const radius = houseConfig.size / 2 + 6;
+
+  for (let z = 0; z < state.height; z += 1) {
+    const worldZ = z - halfZ;
+    for (let x = 0; x < state.width; x += 1) {
+      const worldX = x - halfX;
+      const dx = worldX - houseConfig.x;
+      const dz = worldZ - houseConfig.z;
+      if (dx * dx + dz * dz <= radius * radius) {
+        state.data[z * state.width + x] = flatValue;
+      }
+    }
+  }
+}
+
+function toggleHouseDoor() {
+  if (!houseDoorPivot) return false;
+  houseDoorOpen = !houseDoorOpen;
+  houseDoorPivot.rotation.y = houseDoorOpen ? -Math.PI / 2 : 0;
+  return true;
+}
+
+function buildHouse() {
+  const houseGroup = new THREE.Group();
+  const gray = new THREE.MeshStandardMaterial({ color: 0x9c9c9c, roughness: 0.9, metalness: 0.05 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x7b7b7b, roughness: 0.95, metalness: 0.02 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x6b84a6, roughness: 0.2, metalness: 0.4 });
+
+  const baseX = houseConfig.x;
+  const baseZ = houseConfig.z;
+  const ground = sampleHeight(baseX, baseZ);
+  const half = houseConfig.size / 2;
+  const wallHalf = houseConfig.size / 2 - 0.3;
+  const wallHeight = houseConfig.wallHeight;
+
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(houseConfig.size, 1, houseConfig.size), gray);
+  floor.position.set(baseX, ground + 0.5, baseZ);
+  houseGroup.add(floor);
+
+  const wallGeometry = new THREE.BoxGeometry(houseConfig.size, wallHeight, 0.6);
+  const wallN = new THREE.Mesh(wallGeometry, gray);
+  wallN.position.set(baseX, ground + 0.5 + wallHeight / 2, baseZ - wallHalf);
+  houseGroup.add(wallN);
+
+  const doorHalf = houseConfig.doorWidth / 2;
+  const wallSLeft = new THREE.Mesh(new THREE.BoxGeometry(half - doorHalf, wallHeight, 0.6), gray);
+  wallSLeft.position.set(baseX - (doorHalf + (half - doorHalf) / 2), ground + 0.5 + wallHeight / 2, baseZ + wallHalf);
+  houseGroup.add(wallSLeft);
+
+  const wallSRight = new THREE.Mesh(new THREE.BoxGeometry(half - doorHalf, wallHeight, 0.6), gray);
+  wallSRight.position.set(baseX + (doorHalf + (half - doorHalf) / 2), ground + 0.5 + wallHeight / 2, baseZ + wallHalf);
+  houseGroup.add(wallSRight);
+
+  const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(houseConfig.doorWidth + 0.4, houseConfig.doorHeight + 0.6, 0.5), dark);
+  doorFrame.position.set(baseX, ground + 0.5 + houseConfig.doorHeight / 2, baseZ + wallHalf - 0.1);
+  houseGroup.add(doorFrame);
+
+  houseDoorPivot = new THREE.Group();
+  houseDoorPivot.position.set(baseX - doorHalf, ground + 0.5 + houseConfig.doorHeight / 2, baseZ + wallHalf - 0.25);
+  houseDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(houseConfig.doorWidth, houseConfig.doorHeight, 0.3), dark);
+  houseDoorMesh.position.set(doorHalf, 0, 0);
+  houseDoorPivot.add(houseDoorMesh);
+  houseGroup.add(houseDoorPivot);
+
+  const wallGeometrySide = new THREE.BoxGeometry(0.6, wallHeight, houseConfig.size);
+  const wallE = new THREE.Mesh(wallGeometrySide, gray);
+  wallE.position.set(baseX + wallHalf, ground + 0.5 + wallHeight / 2, baseZ);
+  houseGroup.add(wallE);
+
+  const wallW = new THREE.Mesh(wallGeometrySide, gray);
+  wallW.position.set(baseX - wallHalf, ground + 0.5 + wallHeight / 2, baseZ);
+  houseGroup.add(wallW);
+
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(houseConfig.size + 0.6, Math.max(1.8, wallHeight * 0.25), houseConfig.size + 0.6),
+    dark
+  );
+  roof.position.set(baseX, ground + 0.5 + wallHeight + (wallHeight * 0.25) / 2, baseZ);
+  houseGroup.add(roof);
+
+  const windowGeometry = new THREE.BoxGeometry(2.2, 2.2, 0.2);
+  const windowSideGeometry = new THREE.BoxGeometry(0.2, 2.2, 2.2);
+  const windowHeight = ground + 0.5 + wallHeight * 0.65;
+
+  const northOffsets = [-10, 0, 10];
+  northOffsets.forEach((dx) => {
+    const win = new THREE.Mesh(windowGeometry, glass);
+    win.position.set(baseX + dx, windowHeight, baseZ - wallHalf + 0.35);
+    houseGroup.add(win);
+  });
+
+  const southOffsets = [-10, 10];
+  southOffsets.forEach((dx) => {
+    const win = new THREE.Mesh(windowGeometry, glass);
+    win.position.set(baseX + dx, windowHeight, baseZ + wallHalf - 0.35);
+    houseGroup.add(win);
+  });
+
+  const winSouthLeft = new THREE.Mesh(windowGeometry, glass);
+  winSouthLeft.position.set(baseX - 6, windowHeight, baseZ + wallHalf - 0.35);
+  houseGroup.add(winSouthLeft);
+
+  const eastOffsets = [-8, 8];
+  eastOffsets.forEach((dz) => {
+    const win = new THREE.Mesh(windowSideGeometry, glass);
+    win.position.set(baseX + wallHalf - 0.35, windowHeight, baseZ + dz);
+    houseGroup.add(win);
+  });
+
+  const westOffsets = [-8, 8];
+  westOffsets.forEach((dz) => {
+    const win = new THREE.Mesh(windowSideGeometry, glass);
+    win.position.set(baseX - wallHalf + 0.35, windowHeight, baseZ + dz);
+    houseGroup.add(win);
+  });
+
+  house = houseGroup;
+  scene.add(houseGroup);
+}
+
+function placeBlock() {
+  const blockId = actionBar[state.activeSlot];
+  if (!blockId || !terrain) return;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObject(terrain, false);
+  if (!hits.length) return;
+  const hit = hits[0];
+  const halfX = (state.width - 1) / 2;
+  const halfZ = (state.height - 1) / 2;
+  const snappedX = Math.round(hit.point.x + halfX) - halfX;
+  const snappedZ = Math.round(hit.point.z + halfZ) - halfZ;
+  const ground = sampleHeight(snappedX, snappedZ);
+  const key = `${snappedX},${snappedZ}`;
+  if (placedBlocks.has(key)) return;
+
+  const mesh = ensureBlockMesh(blockId).clone();
+  mesh.position.set(snappedX, ground + 0.5, snappedZ);
+  scene.add(mesh);
+  placedBlocks.set(key, mesh);
+}
+
+function placeFromSlot(index) {
+  if (!actionBar[index]) return;
+  state.activeSlot = index;
+  renderActionBar();
+  placeBlock();
+}
 
 heightmapInput.addEventListener("change", (event) => {
   const file = event.target.files[0];
@@ -360,4 +669,5 @@ altitudeButtons.forEach((btn) => {
 setAltitude(state.altitudeTarget);
 loadHeightmapUrl("heightmap.png");
 setupPointerLock();
+buildInventory();
 requestAnimationFrame(animate);

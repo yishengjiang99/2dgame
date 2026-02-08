@@ -122,6 +122,65 @@ body {
   z-index: 2;
 }
 
+.inventory {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  color: var(--ink);
+  z-index: 2;
+  display: grid;
+  gap: 10px;
+  min-width: 260px;
+  backdrop-filter: blur(8px);
+}
+
+.inventory h2 {
+  margin: 0;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.inventory-item,
+.action-slot {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  text-align: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.inventory-item.active,
+.action-slot.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.action-bar {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.inventory-help {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .crosshair {
   position: fixed;
   top: 50%;
@@ -162,5 +221,10 @@ body {
 
   .hud-controls {
     width: 100%;
+  }
+
+  .inventory {
+    right: 16px;
+    left: 16px;
   }
 }

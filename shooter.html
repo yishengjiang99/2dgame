@@ -10,7 +10,7 @@
     <div class="hud">
       <div>
         <h1>Terrain Shooter</h1>
-        <p>WASD to move. Click to lock pointer. Left-drag: movement direction. Right-drag: camera. Both mouse buttons: forward. 1-5: altitude.</p>
+        <p>W/S move. A/D or ←/→ turn movement. Q/E strafe. Left-drag: movement direction. Right-drag: camera. Both mouse buttons: back. 1-5: action bar. Click door to open.</p>
       </div>
       <div class="hud-controls">
         <label class="file">
@@ -32,9 +32,16 @@
       </div>
     </div>
 
+    <section class="inventory">
+      <h2>Inventory</h2>
+      <div class="inventory-grid" id="inventory"></div>
+      <div class="action-bar" id="action-bar" aria-label="Action bar slots"></div>
+      <p class="inventory-help">Click an inventory block to highlight it, then click a slot to assign. Press 1-5 to place that slot's block. Right-click to place too.</p>
+    </section>
+
     <div id="viewport"></div>
     <div class="crosshair" aria-hidden="true"></div>
-    <div class="status" id="status">Click to enter</div>
+    <div class="status" id="status">Ready</div>
 
     <script type="module" src="shooter.js"></script>
   </body>
