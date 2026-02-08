@@ -53,8 +53,11 @@ let houseDoorPivot = null;
 let houseDoorMesh = null;
 let houseDoorOpen = false;
 const placedBlocks = new Map();
+let longPressTimer = null;
+let longPressTriggered = false;
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2(0, 0);
+const lastMouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 
 const blockCatalog = [
   { id: "grass", label: "Grass", color: 0x5b8c42 },
@@ -77,6 +80,11 @@ const houseConfig = {
   wallHeight: 12,
   doorWidth: 6,
   doorHeight: 9,
+};
+
+const respawnPoint = {
+  x: houseConfig.x,
+  z: houseConfig.z + houseConfig.size / 2 + 30,
 };
 
 function createDefaultHeightmap() {
@@ -129,6 +137,7 @@ function applyHeightmap(image) {
     state.data[i] = gray;
   }
 
+  smoothHeightmap(1);
   state.size = Math.max(state.width - 1, state.height - 1);
   buildTerrain();
 }
@@ -155,11 +164,12 @@ function buildTerrain() {
 
   flattenTerrainForHouse();
 
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const geometry = new THREE.BoxGeometry(1.02, 1.02, 1.02);
   const material = new THREE.MeshStandardMaterial({
     color: 0x496c3f,
     roughness: 0.85,
     metalness: 0.05,
+    flatShading: true,
   });
 
   const count = state.width * state.height;
@@ -181,8 +191,7 @@ function buildTerrain() {
   terrain.instanceMatrix.needsUpdate = true;
   scene.add(terrain);
 
-  camera.position.set(0, state.heightScale + state.altitude, 0);
-  state.yaw = 0;
+  setRespawnFacing();
   state.pitch = -0.2;
   state.moveYaw = 0;
   buildHouse();
@@ -353,6 +362,9 @@ function handleKey(event, active) {
         state.jumpVel = 22;
       }
       break;
+    case "KeyR":
+      if (active) respawn();
+      break;
     default:
       break;
   }
@@ -402,29 +414,58 @@ renderer.domElement.addEventListener("contextmenu", (event) => {
 
 renderer.domElement.addEventListener("pointerdown", (event) => {
   if (event.button === 0) {
-    raycaster.setFromCamera(pointer, camera);
-    if (houseDoorMesh) {
-      const hits = raycaster.intersectObject(houseDoorMesh, false);
-      if (hits.length) {
-        toggleHouseDoor();
-        return;
-      }
-    }
+    longPressTriggered = false;
+    if (longPressTimer) clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => {
+      longPressTriggered = deleteBlockAtCursor();
+    }, 450);
   }
   if (event.button === 2) {
     placeBlock();
   }
 });
 
-renderer.domElement.addEventListener("mousemove", (event) => {
+renderer.domElement.addEventListener("pointerup", (event) => {
+  if (event.button !== 0) return;
+  if (longPressTimer) {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+  if (longPressTriggered) return;
+  raycaster.setFromCamera(pointer, camera);
+  if (houseDoorMesh) {
+    const hits = raycaster.intersectObject(houseDoorMesh, false);
+    if (hits.length) {
+      toggleHouseDoor();
+    }
+  }
+});
+
+function updatePointerFromScreen(x, y) {
   const rect = renderer.domElement.getBoundingClientRect();
-  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  pointer.x = ((x - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((y - rect.top) / rect.height) * 2 + 1;
+}
+
+renderer.domElement.addEventListener("mousemove", (event) => {
+  lastMouse.x = event.clientX;
+  lastMouse.y = event.clientY;
+  updatePointerFromScreen(event.clientX, event.clientY);
+});
+
+window.addEventListener("mousemove", (event) => {
+  lastMouse.x = event.clientX;
+  lastMouse.y = event.clientY;
+  updatePointerFromScreen(event.clientX, event.clientY);
 });
 
 function buildInventory() {
   inventoryEl.innerHTML = "";
   actionBarEl.innerHTML = "";
+
+  for (let i = 0; i < Math.min(5, blockCatalog.length); i += 1) {
+    if (!actionBar[i]) actionBar[i] = blockCatalog[i].id;
+  }
 
   if (!state.selectedItem && blockCatalog.length) {
     state.selectedItem = blockCatalog[0].id;
@@ -488,10 +529,12 @@ function ensureBlockMesh(blockId) {
 }
 
 function clearPlacedBlocks() {
-  placedBlocks.forEach((mesh) => {
-    scene.remove(mesh);
-    mesh.geometry.dispose();
-    mesh.material.dispose();
+  placedBlocks.forEach((entry) => {
+    entry.meshes.forEach((mesh) => {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    });
   });
   placedBlocks.clear();
 }
@@ -502,6 +545,8 @@ function flattenTerrainForHouse() {
   const centerHeight = sampleHeight(houseConfig.x, houseConfig.z);
   const flatValue = centerHeight / state.heightScale;
   const radius = houseConfig.size / 2 + 6;
+  const centerRadius = 32;
+  const centerValue = sampleHeight(0, 0) / state.heightScale;
 
   for (let z = 0; z < state.height; z += 1) {
     const worldZ = z - halfZ;
@@ -509,11 +554,53 @@ function flattenTerrainForHouse() {
       const worldX = x - halfX;
       const dx = worldX - houseConfig.x;
       const dz = worldZ - houseConfig.z;
-      if (dx * dx + dz * dz <= radius * radius) {
+      const cdx = worldX;
+      const cdz = worldZ;
+      if (cdx * cdx + cdz * cdz <= centerRadius * centerRadius) {
+        state.data[z * state.width + x] = centerValue;
+      } else if (dx * dx + dz * dz <= radius * radius) {
         state.data[z * state.width + x] = flatValue;
       }
     }
   }
+}
+
+function smoothHeightmap(maxDelta) {
+  const maxStep = maxDelta / state.heightScale;
+  const w = state.width;
+  const h = state.height;
+  const data = state.data;
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    for (let z = 0; z < h; z += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const idx = z * w + x;
+        let v = data[idx];
+        if (x > 0) v = clampStep(v, data[idx - 1], maxStep);
+        if (x < w - 1) v = clampStep(v, data[idx + 1], maxStep);
+        if (z > 0) v = clampStep(v, data[idx - w], maxStep);
+        if (z < h - 1) v = clampStep(v, data[idx + w], maxStep);
+        data[idx] = v;
+      }
+    }
+    for (let z = h - 1; z >= 0; z -= 1) {
+      for (let x = w - 1; x >= 0; x -= 1) {
+        const idx = z * w + x;
+        let v = data[idx];
+        if (x > 0) v = clampStep(v, data[idx - 1], maxStep);
+        if (x < w - 1) v = clampStep(v, data[idx + 1], maxStep);
+        if (z > 0) v = clampStep(v, data[idx - w], maxStep);
+        if (z < h - 1) v = clampStep(v, data[idx + w], maxStep);
+        data[idx] = v;
+      }
+    }
+  }
+}
+
+function clampStep(value, neighbor, maxStep) {
+  if (value - neighbor > maxStep) return neighbor + maxStep;
+  if (neighbor - value > maxStep) return neighbor - maxStep;
+  return value;
 }
 
 function toggleHouseDoor() {
@@ -521,6 +608,23 @@ function toggleHouseDoor() {
   houseDoorOpen = !houseDoorOpen;
   houseDoorPivot.rotation.y = houseDoorOpen ? -Math.PI / 2 : 0;
   return true;
+}
+
+function respawn() {
+  setRespawnFacing();
+  state.jumpOffset = 0;
+  state.jumpVel = 0;
+  state.move.forward = 0;
+  state.move.right = 0;
+}
+
+function setRespawnFacing() {
+  const dx = houseConfig.x - respawnPoint.x;
+  const dz = houseConfig.z - respawnPoint.z;
+  const ground = sampleHeight(respawnPoint.x, respawnPoint.z);
+  camera.position.set(respawnPoint.x, ground + state.altitude, respawnPoint.z);
+  state.yaw = Math.atan2(dx, dz) + Math.PI;
+  state.moveYaw = state.yaw;
 }
 
 function buildHouse() {
@@ -564,6 +668,13 @@ function buildHouse() {
   houseDoorMesh.position.set(doorHalf, 0, 0);
   houseDoorPivot.add(houseDoorMesh);
   houseGroup.add(houseDoorPivot);
+
+  const capBlock = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), dark);
+  capBlock.position.set(baseX - 1, ground + 0.5 + houseConfig.doorHeight + 0.8, baseZ + wallHalf - 0.2);
+  houseGroup.add(capBlock);
+  const capBlock2 = capBlock.clone();
+  capBlock2.position.set(baseX + 1, ground + 0.5 + houseConfig.doorHeight + 0.8, baseZ + wallHalf - 0.2);
+  houseGroup.add(capBlock2);
 
   const wallGeometrySide = new THREE.BoxGeometry(0.6, wallHeight, houseConfig.size);
   const wallE = new THREE.Mesh(wallGeometrySide, gray);
@@ -634,19 +745,56 @@ function placeBlock() {
   const snappedZ = Math.round(hit.point.z + halfZ) - halfZ;
   const ground = sampleHeight(snappedX, snappedZ);
   const key = `${snappedX},${snappedZ}`;
-  if (placedBlocks.has(key)) return;
-
+  const entry = placedBlocks.get(key);
+  const topHeight = entry ? entry.height : ground;
   const mesh = ensureBlockMesh(blockId).clone();
-  mesh.position.set(snappedX, ground + 0.5, snappedZ);
+  mesh.position.set(snappedX, topHeight + 0.5, snappedZ);
   scene.add(mesh);
-  placedBlocks.set(key, mesh);
+  if (entry) {
+    entry.meshes.push(mesh);
+    entry.height = topHeight + 1;
+  } else {
+    placedBlocks.set(key, { meshes: [mesh], height: ground + 1 });
+  }
 }
 
 function placeFromSlot(index) {
   if (!actionBar[index]) return;
   state.activeSlot = index;
   renderActionBar();
+  updatePointerFromScreen(lastMouse.x, lastMouse.y);
   placeBlock();
+}
+
+function deleteBlockAtCursor() {
+  if (!placedBlocks.size) return false;
+  raycaster.setFromCamera(pointer, camera);
+  const meshes = [];
+  placedBlocks.forEach((entry) => {
+    meshes.push(...entry.meshes);
+  });
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (!hits.length) return false;
+  const hitMesh = hits[0].object;
+  let removed = false;
+  placedBlocks.forEach((entry, key) => {
+    const index = entry.meshes.indexOf(hitMesh);
+    if (index !== -1) {
+      const mesh = entry.meshes.splice(index, 1)[0];
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+      if (entry.meshes.length === 0) {
+        placedBlocks.delete(key);
+      } else {
+        const { x, z } = mesh.position;
+        const ground = sampleHeight(x, z);
+        entry.height = ground + entry.meshes.length;
+      }
+      removed = true;
+    }
+  });
+  return removed;
 }
 
 heightmapInput.addEventListener("change", (event) => {
