@@ -3,47 +3,97 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Snake</title>
-    <link rel="stylesheet" href="styles.css" />
+    <title>Games Index</title>
+    <style>
+      :root {
+        --bg: #f3f1ea;
+        --ink: #1d1c19;
+        --muted: #6a665c;
+        --panel: #ffffff;
+        --border: #d6d2c7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Georgia", "Times New Roman", serif;
+        color: var(--ink);
+        background: radial-gradient(circle at top, #fff7e7, var(--bg));
+      }
+
+      main {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 32px 20px;
+        display: grid;
+        gap: 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 32px;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      a.card {
+        text-decoration: none;
+        color: inherit;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        border-radius: 12px;
+        padding: 16px;
+        display: grid;
+        gap: 6px;
+      }
+
+      a.card:hover {
+        border-color: #bfb9ab;
+        transform: translateY(-1px);
+      }
+
+      .title {
+        font-size: 20px;
+      }
+
+      .hint {
+        color: var(--muted);
+        font-size: 14px;
+      }
+    </style>
   </head>
   <body>
-    <main class="app">
-      <header class="top">
-        <div>
-          <h1>Snake</h1>
-          <p class="sub">Classic grid movement. Eat to grow. Don’t hit walls or yourself.</p>
-        </div>
-        <div class="top-right">
-          <a class="nav-link" href="shooter.html">Terrain Shooter</a>
-          <div class="score">
-            <span>Score</span>
-            <strong id="score">0</strong>
-          </div>
-        </div>
-      </header>
-
-      <section class="board-wrap">
-        <canvas id="board" width="400" height="400" aria-label="Snake game board"></canvas>
-        <div class="status" id="status"></div>
-      </section>
-
-      <section class="controls">
-        <div class="row">
-          <button id="restart">Restart</button>
-          <button id="pause">Pause</button>
-        </div>
-        <div class="pad" aria-label="On-screen controls">
-          <button data-dir="up">▲</button>
-          <div class="row">
-            <button data-dir="left">◀</button>
-            <button data-dir="down">▼</button>
-            <button data-dir="right">▶</button>
-          </div>
-        </div>
-        <p class="help">Controls: Arrow keys / WASD. Space to pause. R to restart.</p>
+    <main>
+      <div>
+        <h1>Games</h1>
+        <p>Pick a game to play.</p>
+      </div>
+      <section class="grid">
+        <a class="card" href="snake/index.html">
+          <div class="title">Snake</div>
+          <div class="hint">Classic grid movement. Eat to grow. Don’t hit walls or yourself.</div>
+        </a>
+        <a class="card" href="minecraft/index.html">
+          <div class="title">Terrain Shooter</div>
+          <div class="hint">Explore the heightmap, place blocks, and build around the house.</div>
+        </a>
       </section>
     </main>
-
-    <script type="module" src="game.js"></script>
   </body>
 </html>

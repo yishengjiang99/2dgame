@@ -6,6 +6,9 @@ const heightmapUrlInput = document.getElementById("heightmap-url");
 const loadUrlButton = document.getElementById("load-url");
 const statusEl = document.getElementById("status");
 const altitudeButtons = Array.from(document.querySelectorAll(".altitudes button"));
+const debugEl = document.getElementById("debug");
+const heightmapPanel = document.getElementById("heightmap-panel");
+const inventoryPanel = document.getElementById("inventory-panel");
 const inventoryEl = document.getElementById("inventory");
 const actionBarEl = document.getElementById("action-bar");
 
@@ -28,6 +31,7 @@ const state = {
   jumpOffset: 0,
   activeSlot: 0,
   selectedItem: null,
+  stepTimer: 0,
 };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -55,6 +59,7 @@ let houseDoorOpen = false;
 const placedBlocks = new Map();
 let longPressTimer = null;
 let longPressTriggered = false;
+let audioCtx = null;
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2(0, 0);
 const lastMouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
@@ -238,6 +243,8 @@ function handlePointerMove(event) {
   if (state.mouse.left) {
     state.moveYaw -= event.movementX * sensitivity;
     state.yaw = state.moveYaw;
+    state.pitch -= event.movementY * sensitivity;
+    state.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, state.pitch));
   }
   if (state.mouse.right) {
     state.yaw -= event.movementX * sensitivity;
@@ -289,6 +296,18 @@ function updateCamera(delta) {
     state.jumpVel = 0;
   }
   camera.position.y = ground + state.altitude + state.jumpOffset;
+
+  const moving = dir.lengthSq() > 0.0001;
+  if (moving && state.jumpOffset === 0) {
+    state.stepTimer += delta;
+    const interval = state.move.boost ? 0.22 : 0.3;
+    if (state.stepTimer >= interval) {
+      state.stepTimer = 0;
+      playStepSound();
+    }
+  } else {
+    state.stepTimer = 0;
+  }
 
   camera.rotation.order = "YXZ";
   camera.rotation.y = state.yaw;
@@ -413,6 +432,8 @@ renderer.domElement.addEventListener("contextmenu", (event) => {
 });
 
 renderer.domElement.addEventListener("pointerdown", (event) => {
+  updatePointerFromScreen(event.clientX, event.clientY);
+  ensureAudio();
   if (event.button === 0) {
     longPressTriggered = false;
     if (longPressTimer) clearTimeout(longPressTimer);
@@ -459,12 +480,21 @@ window.addEventListener("mousemove", (event) => {
   updatePointerFromScreen(event.clientX, event.clientY);
 });
 
+window.addEventListener("keydown", () => {
+  ensureAudio();
+});
+
 function buildInventory() {
   inventoryEl.innerHTML = "";
   actionBarEl.innerHTML = "";
 
   for (let i = 0; i < Math.min(5, blockCatalog.length); i += 1) {
     if (!actionBar[i]) actionBar[i] = blockCatalog[i].id;
+  }
+  if (actionBar.length >= 4) {
+    actionBar[0] = "brick";
+    actionBar[2] = "lava";
+    actionBar[3] = "grass";
   }
 
   if (!state.selectedItem && blockCatalog.length) {
@@ -746,7 +776,7 @@ function placeBlock() {
   const ground = sampleHeight(snappedX, snappedZ);
   const key = `${snappedX},${snappedZ}`;
   const entry = placedBlocks.get(key);
-  const topHeight = entry ? entry.height : ground;
+  const topHeight = entry ? entry.height : ground + 1;
   const mesh = ensureBlockMesh(blockId).clone();
   mesh.position.set(snappedX, topHeight + 0.5, snappedZ);
   scene.add(mesh);
@@ -754,8 +784,12 @@ function placeBlock() {
     entry.meshes.push(mesh);
     entry.height = topHeight + 1;
   } else {
-    placedBlocks.set(key, { meshes: [mesh], height: ground + 1 });
+    placedBlocks.set(key, { meshes: [mesh], height: topHeight + 1 });
   }
+  if (debugEl) {
+    debugEl.textContent = `Placed ${blockId} at (${snappedX}, ${Math.round(topHeight + 1)}) z:${snappedZ}`;
+  }
+  playPlaceSound();
 }
 
 function placeFromSlot(index) {
@@ -791,10 +825,46 @@ function deleteBlockAtCursor() {
         const ground = sampleHeight(x, z);
         entry.height = ground + entry.meshes.length;
       }
+      playRemoveSound();
       removed = true;
     }
   });
   return removed;
+}
+
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } else if (audioCtx.state === "suspended") {
+    audioCtx.resume();
+  }
+}
+
+function playTone({ freq = 220, duration = 0.12, type = "sine", gain = 0.08 }) {
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const amp = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  amp.gain.value = gain;
+  osc.connect(amp).connect(audioCtx.destination);
+  const now = audioCtx.currentTime;
+  amp.gain.setValueAtTime(gain, now);
+  amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  osc.start(now);
+  osc.stop(now + duration);
+}
+
+function playPlaceSound() {
+  playTone({ freq: 480, duration: 0.08, type: "square", gain: 0.05 });
+}
+
+function playRemoveSound() {
+  playTone({ freq: 160, duration: 0.12, type: "sawtooth", gain: 0.05 });
+}
+
+function playStepSound() {
+  playTone({ freq: 220 + Math.random() * 40, duration: 0.06, type: "triangle", gain: 0.03 });
 }
 
 heightmapInput.addEventListener("change", (event) => {
@@ -815,7 +885,9 @@ altitudeButtons.forEach((btn) => {
 });
 
 setAltitude(state.altitudeTarget);
-loadHeightmapUrl("heightmap.png");
+loadHeightmapUrl(new URL("./heightmap.png", import.meta.url).toString());
 setupPointerLock();
 buildInventory();
+if (heightmapPanel) heightmapPanel.open = false;
+if (inventoryPanel) inventoryPanel.open = true;
 requestAnimationFrame(animate);
