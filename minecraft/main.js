@@ -39,14 +39,14 @@ const state = {
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setSize(Math.max(window.innerWidth, window.innerHeight), Math.min(window.innerWidth, window.innerHeight));
 renderer.setClearColor(0xa7c4ff, 1);
 viewport.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xa7c4ff, 60, 380);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 800);
+const camera = new THREE.PerspectiveCamera(70, Math.max(window.innerWidth, window.innerHeight) / Math.min(window.innerWidth, window.innerHeight), 0.1, 800);
 
 const ambient = new THREE.AmbientLight(0xffffff, 0.5);
 scene.add(ambient);
@@ -336,9 +336,11 @@ function lerpAngle(a, b, t) {
 }
 
 function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
+  const lw = Math.max(window.innerWidth, window.innerHeight);
+  const lh = Math.min(window.innerWidth, window.innerHeight);
+  camera.aspect = lw / lh;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(lw, lh);
 }
 
 function animate(time) {
@@ -474,14 +476,30 @@ renderer.domElement.addEventListener("pointerup", (event) => {
     const hits = raycaster.intersectObject(houseDoorMesh, false);
     if (hits.length) {
       toggleHouseDoor();
+      return;
     }
+  }
+  if (event.pointerType === "touch") {
+    placeBlock();
   }
 });
 
 function updatePointerFromScreen(x, y) {
-  const rect = renderer.domElement.getBoundingClientRect();
-  pointer.x = ((x - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -((y - rect.top) / rect.height) * 2 + 1;
+  if (window.innerHeight > window.innerWidth) {
+    // Portrait mode: body is rotated 90deg; remap physical coords to landscape canvas space
+    pointer.x = (y / window.innerHeight) * 2 - 1;
+    pointer.y = -((window.innerWidth - x) / window.innerWidth) * 2 + 1;
+  } else {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.x = ((x - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((y - rect.top) / rect.height) * 2 + 1;
+  }
+}
+
+function remapToLandscape(x, y) {
+  return window.innerHeight > window.innerWidth
+    ? { x: y, y: window.innerWidth - x }
+    : { x, y };
 }
 
 renderer.domElement.addEventListener("mousemove", (event) => {
@@ -920,14 +938,15 @@ function setupMobileControls() {
   gesturePad.addEventListener("touchstart", (e) => {
     e.preventDefault();
     const t = e.changedTouches[0];
-    gestureOrigin = { x: t.clientX, y: t.clientY };
+    gestureOrigin = remapToLandscape(t.clientX, t.clientY);
     ensureAudio();
   }, { passive: false });
 
   gesturePad.addEventListener("touchmove", (e) => {
     e.preventDefault();
     const t = e.changedTouches[0];
-    applyGesture(t.clientX, t.clientY);
+    const mapped = remapToLandscape(t.clientX, t.clientY);
+    applyGesture(mapped.x, mapped.y);
   }, { passive: false });
 
   gesturePad.addEventListener("touchend", (e) => {
