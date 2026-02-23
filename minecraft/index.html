@@ -4,20 +4,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Terrain Shooter</title>
   <link rel="stylesheet" href="/minecraft/styles.css" />
 </head>
 
 <body>
   <div class="hud">
-    <div>
+    <div class="hud-info">
       <h1>Terrain Shooter</h1>
-      <p>W/S move. A/D or ←/→ turn movement. Q/E strafe. Left-drag: movement direction. Right-drag: camera. Both mouse
-        buttons: back. 1-5: action bar. Click door to open.</p>
-      <a class="back-link" href="../index.html">← Back to index</a>
+      <p>W/S move. A/D or ←/→ turn. Q/E strafe. Touch: left pad to move/turn, ▲▼⚡ on right. Double-tap ▲ for fly mode.</p>
+      <a class="back-link" href="../index.html">← Back</a>
     </div>
     <details class="hud-controls" id="heightmap-panel">
-      <summary>Heightmap</summary>
+      <summary title="Heightmap settings">&#9776;</summary>
       <label class="file">
         Bitmap
         <input id="heightmap" type="file" accept="image/*" />
@@ -28,27 +29,40 @@
         <button id="load-url" type="button">Load</button>
       </label>
       <div class="altitudes" aria-label="Altitude presets">
-        <button data-alt="2">Alt 1</button>
-        <button data-alt="6">Alt 2</button>
-        <button data-alt="12">Alt 3</button>
-        <button data-alt="24">Alt 4</button>
-        <button data-alt="40">Alt 5</button>
+        <button data-alt="2">1</button>
+        <button data-alt="6">2</button>
+        <button data-alt="12">3</button>
+        <button data-alt="24">4</button>
+        <button data-alt="40">5</button>
       </div>
     </details>
   </div>
 
   <details class="inventory" id="inventory-panel" open>
-    <summary>Inventory</summary>
+    <summary>&#9776;</summary>
     <div class="inventory-grid" id="inventory"></div>
     <div class="action-bar" id="action-bar" aria-label="Action bar slots"></div>
-    <p class="inventory-help">Click an inventory block to highlight it, then click a slot to assign. Press 1-5 to place
-      that slot's block. Right-click to place too.</p>
   </details>
 
   <div id="viewport"></div>
   <div class="crosshair" aria-hidden="true"></div>
   <div class="status" id="status">Ready</div>
   <div class="debug" id="debug">Place a block to see coordinates</div>
+
+  <!-- Mobile touch controllers -->
+  <div class="mobile-controls" id="mobile-controls" aria-label="Mobile controls">
+    <div class="gesture-pad" id="gesture-pad" aria-label="Move and turn"></div>
+    <div class="right-buttons">
+      <button class="ctrl-btn" id="btn-up" aria-label="Jump / Fly up">&#9650;</button>
+      <button class="ctrl-btn" id="btn-turbo" aria-label="Turbo">&#9889;</button>
+      <button class="ctrl-btn" id="btn-down" aria-label="Fly down">&#9660;</button>
+    </div>
+  </div>
+
+  <!-- Portrait mode overlay -->
+  <div class="portrait-overlay" id="portrait-overlay" aria-hidden="true">
+    <span>&#128260; Rotate to landscape</span>
+  </div>
 
   <script type="module" src="/minecraft/main.js"></script>
 </body>
