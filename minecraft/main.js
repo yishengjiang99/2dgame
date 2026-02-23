@@ -32,6 +32,9 @@ const state = {
   activeSlot: 0,
   selectedItem: null,
   stepTimer: 0,
+  flying: false,
+  flyY: 0,
+  flyVel: 0,
 };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -287,15 +290,28 @@ function updateCamera(delta) {
   camera.position.z = Math.max(-half, Math.min(half, camera.position.z));
 
   const ground = sampleHeight(camera.position.x, camera.position.z);
-  state.altitude += (state.altitudeTarget - state.altitude) * Math.min(1, delta * 6);
-  const gravity = 90;
-  state.jumpVel -= gravity * delta;
-  state.jumpOffset += state.jumpVel * delta;
-  if (state.jumpOffset < 0) {
+
+  if (state.flying) {
+    const flySpeed = state.move.boost ? 40 : 18;
+    state.flyVel += (state.flyUp ? flySpeed : state.flyDown ? -flySpeed : 0) * delta * 4;
+    state.flyVel *= Math.exp(-1.897 * delta);
+    state.flyY += state.flyVel * delta;
+    const minFlyY = ground + 2;
+    if (state.flyY < minFlyY) state.flyY = minFlyY;
+    camera.position.y = state.flyY;
     state.jumpOffset = 0;
     state.jumpVel = 0;
+  } else {
+    state.altitude += (state.altitudeTarget - state.altitude) * Math.min(1, delta * 6);
+    const gravity = 90;
+    state.jumpVel -= gravity * delta;
+    state.jumpOffset += state.jumpVel * delta;
+    if (state.jumpOffset < 0) {
+      state.jumpOffset = 0;
+      state.jumpVel = 0;
+    }
+    camera.position.y = ground + state.altitude + state.jumpOffset;
   }
-  camera.position.y = ground + state.altitude + state.jumpOffset;
 
   const moving = dir.lengthSq() > 0.0001;
   if (moving && state.jumpOffset === 0) {
@@ -867,6 +883,135 @@ function playStepSound() {
   playTone({ freq: 220 + Math.random() * 40, duration: 0.06, type: "triangle", gain: 0.03 });
 }
 
+function setupMobileControls() {
+  // Try to lock screen to landscape
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock("landscape").catch((err) => console.warn("Orientation lock failed:", err));
+  }
+
+  const gesturePad = document.getElementById("gesture-pad");
+  const btnUp = document.getElementById("btn-up");
+  const btnDown = document.getElementById("btn-down");
+  const btnTurbo = document.getElementById("btn-turbo");
+
+  if (!gesturePad || !btnUp || !btnDown || !btnTurbo) return;
+
+  // Gesture pad – left joystick (move + turn)
+  let gestureOrigin = null;
+  const DEAD_ZONE = 8;
+  const MAX_DIST = 50;
+
+  function applyGesture(cx, cy) {
+    if (!gestureOrigin) return;
+    const dx = cx - gestureOrigin.x;
+    const dy = cy - gestureOrigin.y;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    state.turn.left = adx > DEAD_ZONE && dx < 0;
+    state.turn.right = adx > DEAD_ZONE && dx > 0;
+    if (ady > DEAD_ZONE) {
+      const norm = Math.max(-1, Math.min(1, dy / MAX_DIST));
+      state.move.forward = norm;
+    } else {
+      state.move.forward = 0;
+    }
+  }
+
+  gesturePad.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    gestureOrigin = { x: t.clientX, y: t.clientY };
+    ensureAudio();
+  }, { passive: false });
+
+  gesturePad.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    applyGesture(t.clientX, t.clientY);
+  }, { passive: false });
+
+  gesturePad.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    gestureOrigin = null;
+    state.move.forward = 0;
+    state.turn.left = false;
+    state.turn.right = false;
+  }, { passive: false });
+
+  // Up button – jump / fly up; double-tap toggles fly mode
+  let lastUpTap = 0;
+  btnUp.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    ensureAudio();
+    const now = Date.now();
+    if (now - lastUpTap < 350) {
+      // double-tap: toggle fly mode
+      state.flying = !state.flying;
+      if (state.flying) {
+        state.flyY = camera.position.y;
+        state.flyVel = 0;
+      }
+      btnUp.classList.toggle("fly-active", state.flying);
+    }
+    lastUpTap = now;
+    if (state.flying) {
+      state.flyUp = true;
+    } else if (state.jumpOffset === 0) {
+      state.jumpVel = 22;
+    }
+    btnUp.classList.add("pressed");
+  });
+
+  btnUp.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    state.flyUp = false;
+    btnUp.classList.remove("pressed");
+  });
+
+  btnUp.addEventListener("pointerleave", () => {
+    state.flyUp = false;
+    btnUp.classList.remove("pressed");
+  });
+
+  // Down button – fly down
+  btnDown.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    state.flyDown = true;
+    btnDown.classList.add("pressed");
+    ensureAudio();
+  });
+
+  btnDown.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    state.flyDown = false;
+    btnDown.classList.remove("pressed");
+  });
+
+  btnDown.addEventListener("pointerleave", () => {
+    state.flyDown = false;
+    btnDown.classList.remove("pressed");
+  });
+
+  // Turbo button – temporary speed boost
+  btnTurbo.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    state.move.boost = true;
+    btnTurbo.classList.add("pressed");
+    ensureAudio();
+  });
+
+  btnTurbo.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    state.move.boost = false;
+    btnTurbo.classList.remove("pressed");
+  });
+
+  btnTurbo.addEventListener("pointerleave", () => {
+    state.move.boost = false;
+    btnTurbo.classList.remove("pressed");
+  });
+}
+
 heightmapInput.addEventListener("change", (event) => {
   const file = event.target.files[0];
   loadHeightmapFile(file);
@@ -890,4 +1035,5 @@ setupPointerLock();
 buildInventory();
 if (heightmapPanel) heightmapPanel.open = false;
 if (inventoryPanel) inventoryPanel.open = true;
+setupMobileControls();
 requestAnimationFrame(animate);
