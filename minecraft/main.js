@@ -1029,6 +1029,44 @@ function setupMobileControls() {
     state.move.boost = false;
     btnTurbo.classList.remove("pressed");
   });
+
+  // Pitch control – swipe up/down outside the movement box pitches the camera
+  let pitchTouchId = null;
+  let pitchTouchOriginY = null;
+  const PITCH_SENSITIVITY = 0.003;
+
+  document.addEventListener("touchstart", (e) => {
+    if (pitchTouchId !== null) return;
+    for (const t of e.changedTouches) {
+      if (gesturePad.contains(t.target)) continue;
+      pitchTouchId = t.identifier;
+      pitchTouchOriginY = remapToLandscape(t.clientX, t.clientY).y;
+      break;
+    }
+  }, { passive: true });
+
+  document.addEventListener("touchmove", (e) => {
+    if (pitchTouchId === null) return;
+    for (const t of e.changedTouches) {
+      if (t.identifier !== pitchTouchId) continue;
+      const mapped = remapToLandscape(t.clientX, t.clientY);
+      const dy = mapped.y - pitchTouchOriginY;
+      state.pitch -= dy * PITCH_SENSITIVITY;
+      state.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, state.pitch));
+      pitchTouchOriginY = mapped.y;
+      break;
+    }
+  }, { passive: true });
+
+  document.addEventListener("touchend", (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === pitchTouchId) {
+        pitchTouchId = null;
+        pitchTouchOriginY = null;
+        break;
+      }
+    }
+  }, { passive: true });
 }
 
 heightmapInput.addEventListener("change", (event) => {
