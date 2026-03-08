@@ -97,6 +97,9 @@ const actionBar = ["stone", "sand", "metal", "torch"];
 const blockPrototypes = new Map();
 const ambientTorches = [];
 const worldProps = [];
+const terrainMatrixDummy = new THREE.Object3D();
+const TERRAIN_BASE_Y = -24;
+const TERRAIN_MINE_STEP = 1;
 
 const houseConfig = {
   x: 8,
@@ -398,21 +401,10 @@ function buildTerrain() {
 
   const count = state.width * state.height;
   terrain = new THREE.InstancedMesh(geometry, material, count);
-  const dummy = new THREE.Object3D();
-  const halfX = (state.width - 1) / 2;
-  const halfZ = (state.height - 1) / 2;
-  const terrainBaseY = -24;
   let i = 0;
   for (let z = 0; z < state.height; z += 1) {
     for (let x = 0; x < state.width; x += 1) {
-      const heightValue = state.data[z * state.width + x];
-      const y = heightValue * state.heightScale;
-      const topY = y + 1;
-      const columnHeight = Math.max(1, topY - terrainBaseY);
-      dummy.position.set(x - halfX, terrainBaseY + columnHeight / 2, z - halfZ);
-      dummy.scale.set(1, columnHeight, 1);
-      dummy.updateMatrix();
-      terrain.setMatrixAt(i, dummy.matrix);
+      updateTerrainColumnMatrix(x, z, i);
       i += 1;
     }
   }
@@ -426,6 +418,20 @@ function buildTerrain() {
   clearPlacedBlocks();
   respawnWorldProps();
   respawnAmbientTorches();
+}
+
+function updateTerrainColumnMatrix(x, z, instanceId = z * state.width + x) {
+  if (!terrain) return;
+  const halfX = (state.width - 1) / 2;
+  const halfZ = (state.height - 1) / 2;
+  const heightValue = state.data[z * state.width + x];
+  const y = heightValue * state.heightScale;
+  const topY = y + 1;
+  const columnHeight = Math.max(1, topY - TERRAIN_BASE_Y);
+  terrainMatrixDummy.position.set(x - halfX, TERRAIN_BASE_Y + columnHeight / 2, z - halfZ);
+  terrainMatrixDummy.scale.set(1, columnHeight, 1);
+  terrainMatrixDummy.updateMatrix();
+  terrain.setMatrixAt(instanceId, terrainMatrixDummy.matrix);
 }
 
 function sampleHeight(x, z) {
@@ -1298,40 +1304,84 @@ function placeFromSlot(index) {
 }
 
 function deleteBlockAtCursor() {
-  if (!placedBlocks.size) return false;
-  raycaster.setFromCamera(pointer, camera);
-  const objects = [];
-  placedBlocks.forEach((entry) => {
-    objects.push(...entry.objects);
-  });
-  const hits = raycaster.intersectObjects(objects, true);
-  if (!hits.length) return false;
-  const hitObject = hits[0].object;
   let removed = false;
-  placedBlocks.forEach((entry, key) => {
-    const index = entry.objects.findIndex((object) => {
-      let current = hitObject;
-      while (current) {
-        if (current === object) return true;
-        current = current.parent;
-      }
-      return false;
+  if (placedBlocks.size) {
+    raycaster.setFromCamera(pointer, camera);
+    const objects = [];
+    placedBlocks.forEach((entry) => {
+      objects.push(...entry.objects);
     });
-    if (index !== -1) {
-      const object = entry.objects.splice(index, 1)[0];
-      const { x, z } = object.position;
-      disposeObject(object);
-      if (entry.objects.length === 0) {
-        placedBlocks.delete(key);
-      } else {
-        const ground = sampleHeight(x, z);
-        entry.height = ground + entry.objects.length;
-      }
-      playRemoveSound();
-      removed = true;
+    const hits = raycaster.intersectObjects(objects, true);
+    if (hits.length) {
+      const hitObject = hits[0].object;
+      placedBlocks.forEach((entry, key) => {
+        const index = entry.objects.findIndex((object) => {
+          let current = hitObject;
+          while (current) {
+            if (current === object) return true;
+            current = current.parent;
+          }
+          return false;
+        });
+        if (index !== -1) {
+          const object = entry.objects.splice(index, 1)[0];
+          const { x, z } = object.position;
+          disposeObject(object);
+          if (entry.objects.length === 0) {
+            placedBlocks.delete(key);
+          } else {
+            const ground = sampleHeight(x, z);
+            entry.height = ground + entry.objects.length;
+          }
+          playRemoveSound();
+          removed = true;
+        }
+      });
     }
-  });
-  return removed;
+  }
+  if (removed) return true;
+  return mineTerrainAtCursor();
+}
+
+function mineTerrainAtCursor() {
+  if (!terrain) return false;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObject(terrain, false);
+  if (!hits.length) return false;
+
+  const hit = hits[0];
+  const instanceId = hit.instanceId;
+  if (instanceId == null) return false;
+
+  const xIndex = instanceId % state.width;
+  const zIndex = Math.floor(instanceId / state.width);
+  const dataIndex = zIndex * state.width + xIndex;
+  const step = TERRAIN_MINE_STEP / state.heightScale;
+  const nextValue = Math.max(0, state.data[dataIndex] - step);
+  if (nextValue === state.data[dataIndex]) return false;
+
+  state.data[dataIndex] = nextValue;
+  updateTerrainColumnMatrix(xIndex, zIndex, instanceId);
+  terrain.instanceMatrix.needsUpdate = true;
+
+  const halfX = (state.width - 1) / 2;
+  const halfZ = (state.height - 1) / 2;
+  const worldX = xIndex - halfX;
+  const worldZ = zIndex - halfZ;
+  const key = `${worldX},${worldZ}`;
+  const entry = placedBlocks.get(key);
+  if (entry) {
+    entry.objects.forEach((object) => {
+      object.position.y -= TERRAIN_MINE_STEP;
+    });
+    entry.height = Math.max(sampleHeight(worldX, worldZ) + 1, entry.height - TERRAIN_MINE_STEP);
+  }
+
+  if (debugEl) {
+    debugEl.textContent = `Mined terrain at (${worldX}, ${Math.round(sampleHeight(worldX, worldZ))}) z:${worldZ}`;
+  }
+  playRemoveSound();
+  return true;
 }
 
 function ensureAudio() {
