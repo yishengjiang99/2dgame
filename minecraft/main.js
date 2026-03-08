@@ -11,6 +11,7 @@ const heightmapPanel = document.getElementById("heightmap-panel");
 const inventoryPanel = document.getElementById("inventory-panel");
 const inventoryEl = document.getElementById("inventory");
 const actionBarEl = document.getElementById("action-bar");
+const orbitToggleButton = document.getElementById("toggle-orbit-speed");
 
 const state = {
   width: 256,
@@ -35,6 +36,11 @@ const state = {
   flying: false,
   flyY: 0,
   flyVel: 0,
+  dayLength: 600,
+  normalDayLength: 600,
+  fastDayLength: 60,
+  fastMode: false,
+  ambientTorchCount: 5,
 };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -53,6 +59,11 @@ scene.add(ambient);
 const sun = new THREE.DirectionalLight(0xffffff, 1);
 sun.position.set(80, 140, 40);
 scene.add(sun);
+const moonLight = new THREE.DirectionalLight(0x8fb6ff, 0.12);
+scene.add(moonLight);
+
+const sky = createSkySystem();
+scene.add(sky.group);
 
 let terrain = null;
 let house = null;
@@ -76,10 +87,12 @@ const blockCatalog = [
   { id: "wood", label: "Wood", color: 0x8b5a2b },
   { id: "metal", label: "Metal", color: 0x9aa3b2 },
   { id: "brick", label: "Brick", color: 0xb5524a },
+  { id: "torch", label: "Torch", color: 0xffbf66 },
 ];
 
-const actionBar = Array.from({ length: 5 }, () => null);
-const blockMeshes = new Map();
+const actionBar = ["stone", "sand", "metal", "torch"];
+const blockPrototypes = new Map();
+const ambientTorches = [];
 
 const houseConfig = {
   x: 8,
@@ -94,6 +107,185 @@ const respawnPoint = {
   x: houseConfig.x,
   z: houseConfig.z + houseConfig.size / 2 + 30,
 };
+
+function createGlowTexture(innerColor, outerColor) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createRadialGradient(128, 128, 16, 128, 128, 128);
+  gradient.addColorStop(0, innerColor);
+  gradient.addColorStop(0.35, outerColor);
+  gradient.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 256, 256);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createSkySystem() {
+  const uniforms = {
+    topColor: { value: new THREE.Color(0x5a8cff) },
+    horizonColor: { value: new THREE.Color(0xffc98a) },
+    bottomColor: { value: new THREE.Color(0xe6f3ff) },
+    nightTopColor: { value: new THREE.Color(0x06111f) },
+    nightBottomColor: { value: new THREE.Color(0x15243e) },
+    sunDirection: { value: new THREE.Vector3(0, 1, 0) },
+    moonDirection: { value: new THREE.Vector3(0, -1, 0) },
+    dayMix: { value: 1 },
+    sunGlow: { value: 0.8 },
+    moonGlow: { value: 0 },
+  };
+
+  const material = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms,
+    vertexShader: `
+      varying vec3 vWorldDirection;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldDirection = normalize(worldPosition.xyz - cameraPosition);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vWorldDirection;
+      uniform vec3 topColor;
+      uniform vec3 horizonColor;
+      uniform vec3 bottomColor;
+      uniform vec3 nightTopColor;
+      uniform vec3 nightBottomColor;
+      uniform vec3 sunDirection;
+      uniform vec3 moonDirection;
+      uniform float dayMix;
+      uniform float sunGlow;
+      uniform float moonGlow;
+
+      void main() {
+        vec3 dir = normalize(vWorldDirection);
+        float horizon = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+        vec3 daySky = mix(bottomColor, horizonColor, smoothstep(0.05, 0.45, horizon));
+        daySky = mix(daySky, topColor, smoothstep(0.4, 1.0, horizon));
+        vec3 nightSky = mix(nightBottomColor, nightTopColor, smoothstep(0.0, 1.0, horizon));
+        vec3 sky = mix(nightSky, daySky, dayMix);
+
+        float sunDisk = pow(max(dot(dir, normalize(sunDirection)), 0.0), 512.0);
+        float sunHalo = pow(max(dot(dir, normalize(sunDirection)), 0.0), 10.0) * sunGlow;
+        float moonDisk = pow(max(dot(dir, normalize(moonDirection)), 0.0), 900.0);
+        float moonHalo = pow(max(dot(dir, normalize(moonDirection)), 0.0), 18.0) * moonGlow;
+
+        sky += vec3(1.0, 0.72, 0.34) * (sunDisk * 2.4 + sunHalo * 0.7);
+        sky += vec3(0.72, 0.82, 1.0) * (moonDisk * 1.4 + moonHalo * 0.35);
+        gl_FragColor = vec4(sky, 1.0);
+      }
+    `,
+  });
+
+  const group = new THREE.Group();
+  const skybox = new THREE.Mesh(new THREE.BoxGeometry(700, 700, 700), material);
+  group.add(skybox);
+
+  const sunGroup = new THREE.Group();
+  const sunCore = new THREE.Mesh(
+    new THREE.SphereGeometry(12, 32, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffe2a1 })
+  );
+  const sunHalo = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: createGlowTexture("rgba(255,255,220,1)", "rgba(255,160,40,0.45)"),
+      color: 0xffb347,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  sunHalo.scale.setScalar(90);
+  sunGroup.add(sunHalo);
+  sunGroup.add(sunCore);
+  group.add(sunGroup);
+
+  const moonGroup = new THREE.Group();
+  const moonCore = new THREE.Mesh(
+    new THREE.SphereGeometry(9, 24, 24),
+    new THREE.MeshBasicMaterial({ color: 0xdce7ff })
+  );
+  const moonHalo = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: createGlowTexture("rgba(235,245,255,0.9)", "rgba(120,160,255,0.22)"),
+      color: 0xb8cbff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  moonHalo.scale.setScalar(56);
+  moonGroup.add(moonHalo);
+  moonGroup.add(moonCore);
+  group.add(moonGroup);
+
+  return { group, uniforms, sunGroup, moonGroup, radius: 260 };
+}
+
+function updateSky(timeSeconds) {
+  const cycle = ((timeSeconds % state.dayLength) + state.dayLength) / state.dayLength;
+  const angle = cycle * Math.PI * 2 - Math.PI / 2;
+  const orbitTilt = Math.PI * 0.22;
+  const sunDirection = new THREE.Vector3(
+    Math.cos(angle),
+    Math.sin(angle),
+    Math.sin(orbitTilt) * Math.cos(angle * 0.6)
+  ).normalize();
+  const moonDirection = sunDirection.clone().multiplyScalar(-1);
+  const daylight = THREE.MathUtils.clamp(sunDirection.y * 0.85 + 0.25, 0, 1);
+  const sunStrength = THREE.MathUtils.smoothstep(Math.max(0, sunDirection.y), 0, 1);
+  const moonStrength = THREE.MathUtils.smoothstep(Math.max(0, moonDirection.y), 0, 1);
+
+  sky.group.position.copy(camera.position);
+  sky.uniforms.sunDirection.value.copy(sunDirection);
+  sky.uniforms.moonDirection.value.copy(moonDirection);
+  sky.uniforms.dayMix.value = daylight;
+  sky.uniforms.sunGlow.value = sunStrength;
+  sky.uniforms.moonGlow.value = moonStrength;
+
+  sky.sunGroup.position.copy(sunDirection).multiplyScalar(sky.radius);
+  sky.moonGroup.position.copy(moonDirection).multiplyScalar(sky.radius);
+  sky.sunGroup.visible = sunDirection.y > -0.12;
+  sky.moonGroup.visible = moonDirection.y > -0.18;
+
+  const fogColor = new THREE.Color(0x0f1726).lerp(new THREE.Color(0xa7c4ff), daylight);
+  scene.fog.color.copy(fogColor);
+  renderer.setClearColor(fogColor, 1);
+
+  ambient.intensity = THREE.MathUtils.lerp(0.16, 0.62, daylight);
+  ambient.color.setRGB(
+    THREE.MathUtils.lerp(0.5, 1, daylight),
+    THREE.MathUtils.lerp(0.56, 0.98, daylight),
+    THREE.MathUtils.lerp(0.72, 0.95, daylight)
+  );
+
+  sun.intensity = THREE.MathUtils.lerp(0.08, 1.85, sunStrength);
+  sun.color.setRGB(
+    THREE.MathUtils.lerp(0.58, 1.0, sunStrength),
+    THREE.MathUtils.lerp(0.66, 0.92, sunStrength),
+    THREE.MathUtils.lerp(0.9, 0.74, sunStrength)
+  );
+  sun.position.copy(sunDirection).multiplyScalar(220);
+
+  moonLight.intensity = THREE.MathUtils.lerp(0.02, 0.28, moonStrength);
+  moonLight.position.copy(moonDirection).multiplyScalar(180);
+}
+
+function toggleFastMode() {
+  state.fastMode = !state.fastMode;
+  state.dayLength = state.fastMode ? state.fastDayLength : state.normalDayLength;
+  statusEl.textContent = state.fastMode ? "Fast orbit: 60s cycle" : "Normal orbit: 10m cycle";
+  if (orbitToggleButton) {
+    orbitToggleButton.textContent = state.fastMode ? "Cycle Mode: Fast" : "Cycle Mode: Slow";
+    orbitToggleButton.classList.toggle("active", state.fastMode);
+  }
+}
 
 function createDefaultHeightmap() {
   const size = 256;
@@ -204,6 +396,7 @@ function buildTerrain() {
   state.moveYaw = 0;
   buildHouse();
   clearPlacedBlocks();
+  respawnAmbientTorches();
 }
 
 function sampleHeight(x, z) {
@@ -347,6 +540,7 @@ function animate(time) {
   const delta = Math.min(0.05, (time - (animate.lastTime || time)) / 1000);
   animate.lastTime = time;
   updateCamera(delta);
+  updateSky(time / 1000);
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
@@ -391,9 +585,6 @@ function handleKey(event, active) {
     case "Digit4":
       if (active) placeFromSlot(3);
       break;
-    case "Digit5":
-      if (active) placeFromSlot(4);
-      break;
     case "Space":
       if (active && state.jumpOffset === 0) {
         state.jumpVel = 22;
@@ -401,6 +592,9 @@ function handleKey(event, active) {
       break;
     case "KeyR":
       if (active) respawn();
+      break;
+    case "KeyF":
+      if (active) toggleFastMode();
       break;
     default:
       break;
@@ -522,17 +716,8 @@ function buildInventory() {
   inventoryEl.innerHTML = "";
   actionBarEl.innerHTML = "";
 
-  for (let i = 0; i < Math.min(5, blockCatalog.length); i += 1) {
-    if (!actionBar[i]) actionBar[i] = blockCatalog[i].id;
-  }
-  if (actionBar.length >= 4) {
-    actionBar[0] = "brick";
-    actionBar[2] = "lava";
-    actionBar[3] = "grass";
-  }
-
   if (!state.selectedItem && blockCatalog.length) {
-    state.selectedItem = blockCatalog[0].id;
+    state.selectedItem = actionBar[0];
   }
 
   blockCatalog.forEach((block) => {
@@ -558,7 +743,7 @@ function renderActionBar() {
     slot.type = "button";
     slot.className = "action-slot";
     const block = blockCatalog.find((b) => b.id === blockId);
-    slot.textContent = block ? `${index + 1}: ${block.label}` : `${index + 1}: Empty`;
+    slot.textContent = block ? block.label : `${index + 1}: Empty`;
     if (index === state.activeSlot) slot.classList.add("active");
     slot.addEventListener("click", () => assignToSlot(index));
     actionBarEl.appendChild(slot);
@@ -582,25 +767,138 @@ function assignToSlot(index) {
   renderActionBar();
 }
 
-function ensureBlockMesh(blockId) {
-  if (blockMeshes.has(blockId)) return blockMeshes.get(blockId);
+function ensureBlockPrototype(blockId) {
+  if (blockPrototypes.has(blockId)) return blockPrototypes.get(blockId);
   const block = blockCatalog.find((b) => b.id === blockId);
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
-  const material = new THREE.MeshStandardMaterial({ color: block.color, roughness: 0.7, metalness: 0.1 });
-  const mesh = new THREE.Mesh(geometry, material);
-  blockMeshes.set(blockId, mesh);
-  return mesh;
+  if (!block) return null;
+
+  let object;
+  if (blockId === "torch") {
+    object = createTorchObject();
+  } else {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshStandardMaterial({ color: block.color, roughness: 0.7, metalness: 0.1 });
+    object = new THREE.Mesh(geometry, material);
+  }
+
+  blockPrototypes.set(blockId, object);
+  return object;
+}
+
+function cloneRenderable(source) {
+  const clone = source.clone(true);
+  clone.traverse((child) => {
+    if (child.isMesh) {
+      child.geometry = child.geometry.clone();
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map((material) => material.clone());
+      } else if (child.material) {
+        child.material = child.material.clone();
+      }
+    }
+  });
+  return clone;
+}
+
+function disposeObject(root) {
+  root.traverse((child) => {
+    if (child.isMesh) {
+      child.geometry?.dispose();
+      if (Array.isArray(child.material)) {
+        child.material.forEach((material) => material.dispose());
+      } else {
+        child.material?.dispose();
+      }
+    }
+  });
+  if (root.parent) root.parent.remove(root);
+}
+
+function createTorchObject() {
+  const group = new THREE.Group();
+
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.11, 1.2, 8),
+    new THREE.MeshStandardMaterial({ color: 0x6f4b2c, roughness: 0.95, metalness: 0.03 })
+  );
+  shaft.position.y = 0.6;
+  group.add(shaft);
+
+  const ember = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 12, 12),
+    new THREE.MeshStandardMaterial({
+      color: 0xffc463,
+      emissive: 0xff9a2f,
+      emissiveIntensity: 1.8,
+      roughness: 0.3,
+      metalness: 0,
+    })
+  );
+  ember.position.y = 1.28;
+  group.add(ember);
+
+  const glow = new THREE.PointLight(0xffb45a, 1.35, 18, 2.1);
+  glow.position.y = 1.4;
+  group.add(glow);
+
+  return group;
 }
 
 function clearPlacedBlocks() {
   placedBlocks.forEach((entry) => {
-    entry.meshes.forEach((mesh) => {
-      scene.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
+    entry.objects.forEach((object) => {
+      disposeObject(object);
     });
   });
   placedBlocks.clear();
+}
+
+function clearAmbientTorches() {
+  ambientTorches.forEach((torch) => disposeObject(torch));
+  ambientTorches.length = 0;
+}
+
+function createTorchPlacement(x, y, z) {
+  const prototype = ensureBlockPrototype("torch");
+  const torch = cloneRenderable(prototype);
+  torch.position.set(x, y, z);
+  return torch;
+}
+
+function randomTorchPosition() {
+  const half = state.size / 2 - 8;
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const x = Math.round(THREE.MathUtils.randFloat(-half, half));
+    const z = Math.round(THREE.MathUtils.randFloat(-half, half));
+    const dx = x - houseConfig.x;
+    const dz = z - houseConfig.z;
+    if (dx * dx + dz * dz < (houseConfig.size * 0.9) ** 2) continue;
+    const rx = x - respawnPoint.x;
+    const rz = z - respawnPoint.z;
+    if (rx * rx + rz * rz < 18 ** 2) continue;
+    return { x, z };
+  }
+  return null;
+}
+
+function respawnAmbientTorches() {
+  clearAmbientTorches();
+  const occupied = new Set();
+
+  for (let i = 0; i < state.ambientTorchCount; i += 1) {
+    const pos = randomTorchPosition();
+    if (!pos) break;
+    const key = `${pos.x},${pos.z}`;
+    if (occupied.has(key)) {
+      i -= 1;
+      continue;
+    }
+    occupied.add(key);
+    const y = sampleHeight(pos.x, pos.z) + 1;
+    const torch = createTorchPlacement(pos.x, y, pos.z);
+    scene.add(torch);
+    ambientTorches.push(torch);
+  }
 }
 
 function flattenTerrainForHouse() {
@@ -680,6 +978,7 @@ function respawn() {
   state.jumpVel = 0;
   state.move.forward = 0;
   state.move.right = 0;
+  respawnAmbientTorches();
 }
 
 function setRespawnFacing() {
@@ -811,17 +1110,22 @@ function placeBlock() {
   const key = `${snappedX},${snappedZ}`;
   const entry = placedBlocks.get(key);
   const topHeight = entry ? entry.height : ground + 1;
-  const mesh = ensureBlockMesh(blockId).clone();
-  mesh.position.set(snappedX, topHeight + 0.5, snappedZ);
-  scene.add(mesh);
+  let object;
+  if (blockId === "torch") {
+    object = createTorchPlacement(snappedX, topHeight, snappedZ);
+  } else {
+    object = cloneRenderable(ensureBlockPrototype(blockId));
+    object.position.set(snappedX, topHeight + 0.5, snappedZ);
+  }
+  scene.add(object);
   if (entry) {
-    entry.meshes.push(mesh);
+    entry.objects.push(object);
     entry.height = topHeight + 1;
   } else {
-    placedBlocks.set(key, { meshes: [mesh], height: topHeight + 1 });
+    placedBlocks.set(key, { objects: [object], height: topHeight + 1 });
   }
   if (debugEl) {
-    debugEl.textContent = `Placed ${blockId} at (${snappedX}, ${Math.round(topHeight + 1)}) z:${snappedZ}`;
+    debugEl.textContent = `Placed ${blockId} at (${snappedX}, ${Math.round(topHeight)}) z:${snappedZ}`;
   }
   playPlaceSound();
 }
@@ -837,27 +1141,32 @@ function placeFromSlot(index) {
 function deleteBlockAtCursor() {
   if (!placedBlocks.size) return false;
   raycaster.setFromCamera(pointer, camera);
-  const meshes = [];
+  const objects = [];
   placedBlocks.forEach((entry) => {
-    meshes.push(...entry.meshes);
+    objects.push(...entry.objects);
   });
-  const hits = raycaster.intersectObjects(meshes, false);
+  const hits = raycaster.intersectObjects(objects, true);
   if (!hits.length) return false;
-  const hitMesh = hits[0].object;
+  const hitObject = hits[0].object;
   let removed = false;
   placedBlocks.forEach((entry, key) => {
-    const index = entry.meshes.indexOf(hitMesh);
+    const index = entry.objects.findIndex((object) => {
+      let current = hitObject;
+      while (current) {
+        if (current === object) return true;
+        current = current.parent;
+      }
+      return false;
+    });
     if (index !== -1) {
-      const mesh = entry.meshes.splice(index, 1)[0];
-      scene.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.material.dispose();
-      if (entry.meshes.length === 0) {
+      const object = entry.objects.splice(index, 1)[0];
+      const { x, z } = object.position;
+      disposeObject(object);
+      if (entry.objects.length === 0) {
         placedBlocks.delete(key);
       } else {
-        const { x, z } = mesh.position;
         const ground = sampleHeight(x, z);
-        entry.height = ground + entry.meshes.length;
+        entry.height = ground + entry.objects.length;
       }
       playRemoveSound();
       removed = true;
@@ -1078,6 +1387,10 @@ loadUrlButton.addEventListener("click", () => {
   loadHeightmapUrl(heightmapUrlInput.value.trim());
 });
 
+if (orbitToggleButton) {
+  orbitToggleButton.addEventListener("click", () => toggleFastMode());
+}
+
 window.addEventListener("keydown", (event) => handleKey(event, true));
 window.addEventListener("keyup", (event) => handleKey(event, false));
 window.addEventListener("resize", onResize);
@@ -1091,6 +1404,6 @@ loadHeightmapUrl(new URL("./heightmap.png", import.meta.url).toString());
 setupPointerLock();
 buildInventory();
 if (heightmapPanel) heightmapPanel.open = false;
-if (inventoryPanel) inventoryPanel.open = true;
+if (inventoryPanel) inventoryPanel.open = false;
 setupMobileControls();
 requestAnimationFrame(animate);
