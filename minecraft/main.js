@@ -111,7 +111,6 @@ const actionBar = ["stone", "sand", "metal", "torch"];
 const blockPrototypes = new Map();
 const ambientTorches = [];
 const worldProps = [];
-const activeLavaFlows = [];
 const terrainMatrixDummy = new THREE.Object3D();
 const TERRAIN_BASE_Y = -24;
 const TERRAIN_MINE_STEP = 1;
@@ -591,7 +590,6 @@ function animate(time) {
   animate.lastTime = time;
   updateCamera(delta);
   updateSky(time / 1000);
-  updateLavaFlows(delta);
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
@@ -889,8 +887,6 @@ function ensureBlockPrototype(blockId) {
   let object;
   if (blockId === "torch") {
     object = createTorchObject();
-  } else if (blockId === "lava") {
-    object = createLavaObject();
   } else {
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshStandardMaterial({ color: block.color, roughness: 0.7, metalness: 0.1 });
@@ -960,28 +956,7 @@ function createTorchObject() {
   return group;
 }
 
-function createLavaObject() {
-  const group = new THREE.Group();
-  const core = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 0.9, 1),
-    new THREE.MeshStandardMaterial({
-      color: 0xff5a26,
-      emissive: 0xff6a1f,
-      emissiveIntensity: 1.35,
-      roughness: 0.28,
-      metalness: 0.02,
-    })
-  );
-  group.add(core);
-
-  const glow = new THREE.PointLight(0xff6e2f, 1.6, 16, 2);
-  glow.position.y = 0.35;
-  group.add(glow);
-  return group;
-}
-
 function clearPlacedBlocks() {
-  activeLavaFlows.length = 0;
   placedBlocks.forEach((entry) => {
     entry.objects.forEach((object) => {
       disposeObject(object);
@@ -1007,13 +982,6 @@ function createTorchPlacement(x, y, z) {
   return torch;
 }
 
-function createLavaPlacement(x, y, z) {
-  const prototype = ensureBlockPrototype("lava");
-  const lava = cloneRenderable(prototype);
-  lava.position.set(x, y + 0.45, z);
-  return lava;
-}
-
 function addPlacedObject(blockId, worldX, worldZ, object, y, metadata = {}) {
   const key = `${worldX},${worldZ}`;
   const entry = placedBlocks.get(key);
@@ -1027,71 +995,6 @@ function addPlacedObject(blockId, worldX, worldZ, object, y, metadata = {}) {
     entry.height = Math.max(entry.height, y + 1);
   } else {
     placedBlocks.set(key, { objects: [object], height: y + 1 });
-  }
-}
-
-function trySpreadLavaCell(source, worldX, worldZ, depth, generated = true) {
-  const half = state.size / 2;
-  if (worldX < -half || worldX > half || worldZ < -half || worldZ > half) return false;
-  const key = `${worldX},${worldZ}`;
-  const entry = placedBlocks.get(key);
-  if (entry && entry.objects.some((object) => object.userData.blockId === "lava")) return false;
-
-  const terrainY = sampleHeight(worldX, worldZ);
-  const topY = entry ? entry.height : terrainY + 1;
-  const lava = createLavaPlacement(worldX, topY, worldZ);
-  addPlacedObject("lava", worldX, worldZ, lava, topY, { generatedLava: generated });
-  source.cells.add(key);
-  source.frontier.push({ x: worldX, z: worldZ, depth });
-  return true;
-}
-
-function startLavaFlow(worldX, worldZ) {
-  const source = {
-    cells: new Set([`${worldX},${worldZ}`]),
-    frontier: [{ x: worldX, z: worldZ, depth: 0 }],
-    timer: 0,
-    interval: 0.18,
-    maxDepth: 5,
-    maxCells: 18,
-  };
-  activeLavaFlows.push(source);
-}
-
-function updateLavaFlows(delta) {
-  for (let i = activeLavaFlows.length - 1; i >= 0; i -= 1) {
-    const flow = activeLavaFlows[i];
-    flow.timer += delta;
-    if (flow.timer < flow.interval) continue;
-    flow.timer = 0;
-
-    const current = flow.frontier.shift();
-    if (!current) {
-      activeLavaFlows.splice(i, 1);
-      continue;
-    }
-    if (current.depth >= flow.maxDepth || flow.cells.size >= flow.maxCells) continue;
-
-    const currentHeight = sampleHeight(current.x, current.z);
-    const neighbors = [
-      { x: current.x + 1, z: current.z },
-      { x: current.x - 1, z: current.z },
-      { x: current.x, z: current.z + 1 },
-      { x: current.x, z: current.z - 1 },
-    ].sort((a, b) => sampleHeight(a.x, a.z) - sampleHeight(b.x, b.z));
-
-    for (const neighbor of neighbors) {
-      if (flow.cells.size >= flow.maxCells) break;
-      const neighborHeight = sampleHeight(neighbor.x, neighbor.z);
-      if (neighborHeight > currentHeight + 2) continue;
-      if (trySpreadLavaCell(flow, neighbor.x, neighbor.z, current.depth + 1, true)) {
-        if (neighborHeight < currentHeight - 0.5) break;
-      }
-    }
-
-    if (!flow.frontier.length || flow.cells.size >= flow.maxCells) {
-      activeLavaFlows.splice(i, 1);
-    }
   }
 }
 
@@ -1476,16 +1379,11 @@ function placeBlock() {
   let object;
   if (blockId === "torch") {
     object = createTorchPlacement(snappedX, topHeight, snappedZ);
-  } else if (blockId === "lava") {
-    object = createLavaPlacement(snappedX, topHeight, snappedZ);
   } else {
     object = cloneRenderable(ensureBlockPrototype(blockId));
     object.position.set(snappedX, topHeight + 0.5, snappedZ);
   }
-  addPlacedObject(blockId, snappedX, snappedZ, object, topHeight, { generatedLava: false });
-  if (blockId === "lava") {
-    startLavaFlow(snappedX, snappedZ);
-  }
+  addPlacedObject(blockId, snappedX, snappedZ, object, topHeight);
   if (debugEl) {
     debugEl.textContent = `Placed ${blockId} at (${snappedX}, ${Math.round(topHeight)}) z:${snappedZ}`;
   }
@@ -1533,7 +1431,7 @@ function deleteBlockAtCursor() {
             const ground = sampleHeight(x, z);
             entry.height = ground + entry.objects.length;
           }
-          if (blockId && !object.userData.generatedLava) {
+          if (blockId) {
             addResource(blockId, 1);
             refreshInventoryUi();
           }
