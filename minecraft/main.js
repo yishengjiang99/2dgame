@@ -44,6 +44,20 @@ const state = {
   treeCount: 34,
   rockCount: 22,
   metalMineCount: 8,
+  survivalMode: true,
+  spaceHoldTimer: null,
+  spaceLongPressTriggered: false,
+  resources: {
+    grass: 0,
+    stone: 18,
+    sand: 14,
+    metal: 8,
+    torch: 6,
+    wood: 0,
+    lava: 0,
+    ice: 0,
+    brick: 0,
+  },
 };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -97,6 +111,7 @@ const actionBar = ["stone", "sand", "metal", "torch"];
 const blockPrototypes = new Map();
 const ambientTorches = [];
 const worldProps = [];
+const activeLavaFlows = [];
 const terrainMatrixDummy = new THREE.Object3D();
 const TERRAIN_BASE_Y = -24;
 const TERRAIN_MINE_STEP = 1;
@@ -576,8 +591,48 @@ function animate(time) {
   animate.lastTime = time;
   updateCamera(delta);
   updateSky(time / 1000);
+  updateLavaFlows(delta);
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
+}
+
+function beginKeyboardFlight() {
+  if (!state.flying) {
+    state.flying = true;
+    state.flyY = camera.position.y;
+    state.flyVel = 0;
+  }
+  state.spaceLongPressTriggered = true;
+  state.flyUp = true;
+}
+
+function handleSpacePress(active, event) {
+  if (active) {
+    if (event.repeat) return;
+    state.spaceLongPressTriggered = false;
+    if (state.flying) {
+      state.flyUp = true;
+      return;
+    }
+    if (state.spaceHoldTimer) clearTimeout(state.spaceHoldTimer);
+    state.spaceHoldTimer = setTimeout(() => {
+      beginKeyboardFlight();
+      state.spaceHoldTimer = null;
+    }, 260);
+    return;
+  }
+
+  if (state.spaceHoldTimer) {
+    clearTimeout(state.spaceHoldTimer);
+    state.spaceHoldTimer = null;
+  }
+  if (state.spaceLongPressTriggered) {
+    state.flyUp = false;
+    return;
+  }
+  if (!state.flying && state.jumpOffset === 0) {
+    state.jumpVel = 22;
+  }
 }
 
 function handleKey(event, active) {
@@ -621,9 +676,10 @@ function handleKey(event, active) {
       if (active) placeFromSlot(3);
       break;
     case "Space":
-      if (active && state.jumpOffset === 0) {
-        state.jumpVel = 22;
-      }
+      handleSpacePress(active, event);
+      break;
+    case "KeyX":
+      state.flyDown = active && state.flying;
       break;
     case "KeyR":
       if (active) respawn();
@@ -759,12 +815,14 @@ function buildInventory() {
     const item = document.createElement("button");
     item.type = "button";
     item.className = "inventory-item";
-    item.textContent = block.label;
+    const count = getResourceCount(block.id);
+    item.textContent = `${block.label} ${count}`;
     item.style.borderColor = `#${block.color.toString(16).padStart(6, "0")}`;
     item.addEventListener("click", () => {
       setSelectedItem(block.id);
     });
     if (state.selectedItem === block.id) item.classList.add("active");
+    if (state.survivalMode && count <= 0) item.classList.add("depleted");
     inventoryEl.appendChild(item);
   });
 
@@ -778,8 +836,10 @@ function renderActionBar() {
     slot.type = "button";
     slot.className = "action-slot";
     const block = blockCatalog.find((b) => b.id === blockId);
-    slot.textContent = block ? block.label : `${index + 1}: Empty`;
+    const count = block ? getResourceCount(block.id) : 0;
+    slot.textContent = block ? `${block.label} ${count}` : `${index + 1}: Empty`;
     if (index === state.activeSlot) slot.classList.add("active");
+    if (state.survivalMode && block && count <= 0) slot.classList.add("depleted");
     slot.addEventListener("click", () => assignToSlot(index));
     actionBarEl.appendChild(slot);
   });
@@ -802,6 +862,25 @@ function assignToSlot(index) {
   renderActionBar();
 }
 
+function getResourceCount(blockId) {
+  return state.resources[blockId] ?? 0;
+}
+
+function addResource(blockId, amount) {
+  state.resources[blockId] = Math.max(0, getResourceCount(blockId) + amount);
+}
+
+function spendResource(blockId, amount = 1) {
+  if (!state.survivalMode) return true;
+  if (getResourceCount(blockId) < amount) return false;
+  state.resources[blockId] -= amount;
+  return true;
+}
+
+function refreshInventoryUi() {
+  buildInventory();
+}
+
 function ensureBlockPrototype(blockId) {
   if (blockPrototypes.has(blockId)) return blockPrototypes.get(blockId);
   const block = blockCatalog.find((b) => b.id === blockId);
@@ -810,6 +889,8 @@ function ensureBlockPrototype(blockId) {
   let object;
   if (blockId === "torch") {
     object = createTorchObject();
+  } else if (blockId === "lava") {
+    object = createLavaObject();
   } else {
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshStandardMaterial({ color: block.color, roughness: 0.7, metalness: 0.1 });
@@ -879,7 +960,28 @@ function createTorchObject() {
   return group;
 }
 
+function createLavaObject() {
+  const group = new THREE.Group();
+  const core = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 0.9, 1),
+    new THREE.MeshStandardMaterial({
+      color: 0xff5a26,
+      emissive: 0xff6a1f,
+      emissiveIntensity: 1.35,
+      roughness: 0.28,
+      metalness: 0.02,
+    })
+  );
+  group.add(core);
+
+  const glow = new THREE.PointLight(0xff6e2f, 1.6, 16, 2);
+  glow.position.y = 0.35;
+  group.add(glow);
+  return group;
+}
+
 function clearPlacedBlocks() {
+  activeLavaFlows.length = 0;
   placedBlocks.forEach((entry) => {
     entry.objects.forEach((object) => {
       disposeObject(object);
@@ -903,6 +1005,94 @@ function createTorchPlacement(x, y, z) {
   const torch = cloneRenderable(prototype);
   torch.position.set(x, y, z);
   return torch;
+}
+
+function createLavaPlacement(x, y, z) {
+  const prototype = ensureBlockPrototype("lava");
+  const lava = cloneRenderable(prototype);
+  lava.position.set(x, y + 0.45, z);
+  return lava;
+}
+
+function addPlacedObject(blockId, worldX, worldZ, object, y, metadata = {}) {
+  const key = `${worldX},${worldZ}`;
+  const entry = placedBlocks.get(key);
+  object.userData.blockId = blockId;
+  object.userData.isPlacedBlock = true;
+  Object.assign(object.userData, metadata);
+  scene.add(object);
+
+  if (entry) {
+    entry.objects.push(object);
+    entry.height = Math.max(entry.height, y + 1);
+  } else {
+    placedBlocks.set(key, { objects: [object], height: y + 1 });
+  }
+}
+
+function trySpreadLavaCell(source, worldX, worldZ, depth, generated = true) {
+  const half = state.size / 2;
+  if (worldX < -half || worldX > half || worldZ < -half || worldZ > half) return false;
+  const key = `${worldX},${worldZ}`;
+  const entry = placedBlocks.get(key);
+  if (entry && entry.objects.some((object) => object.userData.blockId === "lava")) return false;
+
+  const terrainY = sampleHeight(worldX, worldZ);
+  const topY = entry ? entry.height : terrainY + 1;
+  const lava = createLavaPlacement(worldX, topY, worldZ);
+  addPlacedObject("lava", worldX, worldZ, lava, topY, { generatedLava: generated });
+  source.cells.add(key);
+  source.frontier.push({ x: worldX, z: worldZ, depth });
+  return true;
+}
+
+function startLavaFlow(worldX, worldZ) {
+  const source = {
+    cells: new Set([`${worldX},${worldZ}`]),
+    frontier: [{ x: worldX, z: worldZ, depth: 0 }],
+    timer: 0,
+    interval: 0.18,
+    maxDepth: 5,
+    maxCells: 18,
+  };
+  activeLavaFlows.push(source);
+}
+
+function updateLavaFlows(delta) {
+  for (let i = activeLavaFlows.length - 1; i >= 0; i -= 1) {
+    const flow = activeLavaFlows[i];
+    flow.timer += delta;
+    if (flow.timer < flow.interval) continue;
+    flow.timer = 0;
+
+    const current = flow.frontier.shift();
+    if (!current) {
+      activeLavaFlows.splice(i, 1);
+      continue;
+    }
+    if (current.depth >= flow.maxDepth || flow.cells.size >= flow.maxCells) continue;
+
+    const currentHeight = sampleHeight(current.x, current.z);
+    const neighbors = [
+      { x: current.x + 1, z: current.z },
+      { x: current.x - 1, z: current.z },
+      { x: current.x, z: current.z + 1 },
+      { x: current.x, z: current.z - 1 },
+    ].sort((a, b) => sampleHeight(a.x, a.z) - sampleHeight(b.x, b.z));
+
+    for (const neighbor of neighbors) {
+      if (flow.cells.size >= flow.maxCells) break;
+      const neighborHeight = sampleHeight(neighbor.x, neighbor.z);
+      if (neighborHeight > currentHeight + 2) continue;
+      if (trySpreadLavaCell(flow, neighbor.x, neighbor.z, current.depth + 1, true)) {
+        if (neighborHeight < currentHeight - 0.5) break;
+      }
+    }
+
+    if (!flow.frontier.length || flow.cells.size >= flow.maxCells) {
+      activeLavaFlows.splice(i, 1);
+    }
+  }
 }
 
 function createTreeObject() {
@@ -965,9 +1155,9 @@ function createMetalMineObject() {
 }
 
 function createWorldProp(type) {
-  if (type === "tree") return createTreeObject();
-  if (type === "rock") return createRockObject();
-  return createMetalMineObject();
+  const prop = type === "tree" ? createTreeObject() : type === "rock" ? createRockObject() : createMetalMineObject();
+  prop.userData.propType = type;
+  return prop;
 }
 
 function randomPropPosition(radiusPadding = 8) {
@@ -1263,9 +1453,17 @@ function buildHouse() {
 function placeBlock() {
   const blockId = actionBar[state.activeSlot];
   if (!blockId || !terrain) return;
+  if (!spendResource(blockId, 1)) {
+    statusEl.textContent = `Out of ${blockId}`;
+    return;
+  }
   raycaster.setFromCamera(pointer, camera);
   const hits = raycaster.intersectObject(terrain, false);
-  if (!hits.length) return;
+  if (!hits.length) {
+    addResource(blockId, 1);
+    refreshInventoryUi();
+    return;
+  }
   const hit = hits[0];
   const halfX = (state.width - 1) / 2;
   const halfZ = (state.height - 1) / 2;
@@ -1278,20 +1476,20 @@ function placeBlock() {
   let object;
   if (blockId === "torch") {
     object = createTorchPlacement(snappedX, topHeight, snappedZ);
+  } else if (blockId === "lava") {
+    object = createLavaPlacement(snappedX, topHeight, snappedZ);
   } else {
     object = cloneRenderable(ensureBlockPrototype(blockId));
     object.position.set(snappedX, topHeight + 0.5, snappedZ);
   }
-  scene.add(object);
-  if (entry) {
-    entry.objects.push(object);
-    entry.height = topHeight + 1;
-  } else {
-    placedBlocks.set(key, { objects: [object], height: topHeight + 1 });
+  addPlacedObject(blockId, snappedX, snappedZ, object, topHeight, { generatedLava: false });
+  if (blockId === "lava") {
+    startLavaFlow(snappedX, snappedZ);
   }
   if (debugEl) {
     debugEl.textContent = `Placed ${blockId} at (${snappedX}, ${Math.round(topHeight)}) z:${snappedZ}`;
   }
+  refreshInventoryUi();
   playPlaceSound();
 }
 
@@ -1304,6 +1502,7 @@ function placeFromSlot(index) {
 }
 
 function deleteBlockAtCursor() {
+  if (harvestWorldPropAtCursor()) return true;
   let removed = false;
   if (placedBlocks.size) {
     raycaster.setFromCamera(pointer, camera);
@@ -1326,12 +1525,17 @@ function deleteBlockAtCursor() {
         if (index !== -1) {
           const object = entry.objects.splice(index, 1)[0];
           const { x, z } = object.position;
+          const blockId = object.userData.blockId;
           disposeObject(object);
           if (entry.objects.length === 0) {
             placedBlocks.delete(key);
           } else {
             const ground = sampleHeight(x, z);
             entry.height = ground + entry.objects.length;
+          }
+          if (blockId && !object.userData.generatedLava) {
+            addResource(blockId, 1);
+            refreshInventoryUi();
           }
           playRemoveSound();
           removed = true;
@@ -1341,6 +1545,48 @@ function deleteBlockAtCursor() {
   }
   if (removed) return true;
   return mineTerrainAtCursor();
+}
+
+function harvestWorldPropAtCursor() {
+  if (!worldProps.length) return false;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(worldProps, true);
+  if (!hits.length) return false;
+
+  const hitObject = hits[0].object;
+  const index = worldProps.findIndex((prop) => {
+    let current = hitObject;
+    while (current) {
+      if (current === prop) return true;
+      current = current.parent;
+    }
+    return false;
+  });
+  if (index === -1) return false;
+
+  const prop = worldProps.splice(index, 1)[0];
+  const type = prop.userData.propType;
+  let rewardText = "";
+  if (type === "tree") {
+    addResource("wood", 4);
+    addResource("torch", 1);
+    rewardText = "+4 wood, +1 torch";
+  } else if (type === "rock") {
+    addResource("stone", 3);
+    rewardText = "+3 stone";
+  } else if (type === "metal") {
+    addResource("metal", 3);
+    addResource("stone", 1);
+    rewardText = "+3 metal, +1 stone";
+  }
+  disposeObject(prop);
+  refreshInventoryUi();
+  statusEl.textContent = rewardText ? `Gathered ${rewardText}` : `Gathered ${type}`;
+  if (debugEl) {
+    debugEl.textContent = rewardText ? `${type} harvested: ${rewardText}` : `Gathered ${type}`;
+  }
+  playRemoveSound();
+  return true;
 }
 
 function mineTerrainAtCursor() {
@@ -1377,8 +1623,11 @@ function mineTerrainAtCursor() {
     entry.height = Math.max(sampleHeight(worldX, worldZ) + 1, entry.height - TERRAIN_MINE_STEP);
   }
 
+  addResource("grass", 1);
+  refreshInventoryUi();
+
   if (debugEl) {
-    debugEl.textContent = `Mined terrain at (${worldX}, ${Math.round(sampleHeight(worldX, worldZ))}) z:${worldZ}`;
+    debugEl.textContent = `Mined terrain at (${worldX}, ${Math.round(sampleHeight(worldX, worldZ))}) z:${worldZ} +1 grass`;
   }
   playRemoveSound();
   return true;

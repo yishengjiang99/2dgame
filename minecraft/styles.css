@@ -222,6 +222,11 @@ body {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+.inventory-item.depleted,
+.action-slot.depleted {
+  opacity: 0.48;
+}
+
 .action-bar {
   position: fixed;
   left: 50%;
