@@ -364,7 +364,7 @@ function buildTerrain() {
 
   flattenTerrainForHouse();
 
-  const geometry = new THREE.BoxGeometry(1.02, 1.02, 1.02);
+  const geometry = new THREE.BoxGeometry(1.02, 1, 1.02);
   const material = new THREE.MeshStandardMaterial({
     color: 0x496c3f,
     roughness: 0.85,
@@ -377,12 +377,16 @@ function buildTerrain() {
   const dummy = new THREE.Object3D();
   const halfX = (state.width - 1) / 2;
   const halfZ = (state.height - 1) / 2;
+  const terrainBaseY = -24;
   let i = 0;
   for (let z = 0; z < state.height; z += 1) {
     for (let x = 0; x < state.width; x += 1) {
       const heightValue = state.data[z * state.width + x];
       const y = heightValue * state.heightScale;
-      dummy.position.set(x - halfX, y + 0.5, z - halfZ);
+      const topY = y + 1;
+      const columnHeight = Math.max(1, topY - terrainBaseY);
+      dummy.position.set(x - halfX, terrainBaseY + columnHeight / 2, z - halfZ);
+      dummy.scale.set(1, columnHeight, 1);
       dummy.updateMatrix();
       terrain.setMatrixAt(i, dummy.matrix);
       i += 1;
