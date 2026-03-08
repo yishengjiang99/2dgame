@@ -41,6 +41,9 @@ const state = {
   fastDayLength: 60,
   fastMode: false,
   ambientTorchCount: 5,
+  treeCount: 34,
+  rockCount: 22,
+  metalMineCount: 8,
 };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -93,6 +96,7 @@ const blockCatalog = [
 const actionBar = ["stone", "sand", "metal", "torch"];
 const blockPrototypes = new Map();
 const ambientTorches = [];
+const worldProps = [];
 
 const houseConfig = {
   x: 8,
@@ -230,7 +234,7 @@ function createSkySystem() {
 
 function updateSky(timeSeconds) {
   const cycle = ((timeSeconds % state.dayLength) + state.dayLength) / state.dayLength;
-  const angle = cycle * Math.PI * 2 - Math.PI / 2;
+  const angle = cycle * Math.PI * 2;
   const orbitTilt = Math.PI * 0.22;
   const sunDirection = new THREE.Vector3(
     Math.cos(angle),
@@ -288,27 +292,47 @@ function toggleFastMode() {
 }
 
 function createDefaultHeightmap() {
-  const size = 256;
+  const size = 512;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
   const imageData = ctx.createImageData(size, size);
   const data = imageData.data;
+  const hills = [
+    { x: 0.22, y: 0.3, radius: 0.16, height: 0.24 },
+    { x: 0.72, y: 0.26, radius: 0.14, height: 0.2 },
+    { x: 0.34, y: 0.72, radius: 0.18, height: 0.28 },
+    { x: 0.76, y: 0.68, radius: 0.12, height: 0.18 },
+  ];
 
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
-      const nx = x / size - 0.5;
-      const ny = y / size - 0.5;
-      const d = Math.sqrt(nx * nx + ny * ny);
-      const ridge = Math.max(0, 1 - d * 1.4);
-      const noise = (Math.sin(x * 0.12) + Math.cos(y * 0.08) + Math.sin((x + y) * 0.05)) * 0.15;
-      const height = Math.min(1, Math.max(0, ridge + noise));
-      const v = Math.floor(height * 255);
+      const u = x / (size - 1);
+      const v = y / (size - 1);
+      let height = 0.07;
+
+      hills.forEach((hill) => {
+        const dx = u - hill.x;
+        const dy = v - hill.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) / hill.radius;
+        if (dist < 1) {
+          const falloff = 1 - dist * dist;
+          height += hill.height * falloff * falloff;
+        }
+      });
+
+      const gentleVariation =
+        Math.sin(u * Math.PI * 2.2) * 0.008 +
+        Math.cos(v * Math.PI * 2.8) * 0.006 +
+        Math.sin((u + v) * Math.PI * 3.4) * 0.004;
+      height += gentleVariation;
+      height = Math.min(0.48, Math.max(0.045, height));
+      const shade = Math.floor(height * 255);
       const idx = (y * size + x) * 4;
-      data[idx] = v;
-      data[idx + 1] = v;
-      data[idx + 2] = v;
+      data[idx] = shade;
+      data[idx + 1] = shade;
+      data[idx + 2] = shade;
       data[idx + 3] = 255;
     }
   }
@@ -400,6 +424,7 @@ function buildTerrain() {
   state.moveYaw = 0;
   buildHouse();
   clearPlacedBlocks();
+  respawnWorldProps();
   respawnAmbientTorches();
 }
 
@@ -862,11 +887,140 @@ function clearAmbientTorches() {
   ambientTorches.length = 0;
 }
 
+function clearWorldProps() {
+  worldProps.forEach((prop) => disposeObject(prop));
+  worldProps.length = 0;
+}
+
 function createTorchPlacement(x, y, z) {
   const prototype = ensureBlockPrototype("torch");
   const torch = cloneRenderable(prototype);
   torch.position.set(x, y, z);
   return torch;
+}
+
+function createTreeObject() {
+  const group = new THREE.Group();
+
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.4, 0.55, 4.8, 8),
+    new THREE.MeshStandardMaterial({ color: 0x6c4728, roughness: 0.96, metalness: 0.02 })
+  );
+  trunk.position.y = 2.4;
+  group.add(trunk);
+
+  const crownMaterial = new THREE.MeshStandardMaterial({ color: 0x3f6e35, roughness: 0.92, metalness: 0.01 });
+  const crownLow = new THREE.Mesh(new THREE.ConeGeometry(2.8, 4.5, 9), crownMaterial);
+  crownLow.position.y = 5.2;
+  group.add(crownLow);
+  const crownHigh = new THREE.Mesh(new THREE.ConeGeometry(2.1, 3.8, 9), crownMaterial);
+  crownHigh.position.y = 7.1;
+  group.add(crownHigh);
+
+  return group;
+}
+
+function createRockObject() {
+  const mesh = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(1.5, 0),
+    new THREE.MeshStandardMaterial({ color: 0x7e8289, roughness: 0.98, metalness: 0.03, flatShading: true })
+  );
+  return mesh;
+}
+
+function createMetalMineObject() {
+  const group = new THREE.Group();
+  const base = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(1.9, 0),
+    new THREE.MeshStandardMaterial({ color: 0x50555e, roughness: 0.9, metalness: 0.12, flatShading: true })
+  );
+  group.add(base);
+
+  const veinMaterial = new THREE.MeshStandardMaterial({
+    color: 0xb8c4d8,
+    emissive: 0x24384f,
+    emissiveIntensity: 0.45,
+    roughness: 0.42,
+    metalness: 0.82,
+  });
+  const offsets = [
+    [-0.8, 0.35, 0.7],
+    [0.9, -0.2, 0.4],
+    [0.25, 0.8, -0.9],
+  ];
+  offsets.forEach(([x, y, z]) => {
+    const vein = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.3, 1.15), veinMaterial);
+    vein.position.set(x, y, z);
+    vein.rotation.set(Math.random() * 0.5, Math.random() * 1.3, Math.random() * 0.5);
+    group.add(vein);
+  });
+
+  return group;
+}
+
+function createWorldProp(type) {
+  if (type === "tree") return createTreeObject();
+  if (type === "rock") return createRockObject();
+  return createMetalMineObject();
+}
+
+function randomPropPosition(radiusPadding = 8) {
+  const half = state.size / 2 - radiusPadding;
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const x = Math.round(THREE.MathUtils.randFloat(-half, half));
+    const z = Math.round(THREE.MathUtils.randFloat(-half, half));
+    const dx = x - houseConfig.x;
+    const dz = z - houseConfig.z;
+    if (dx * dx + dz * dz < (houseConfig.size + 24) ** 2) continue;
+    const rx = x - respawnPoint.x;
+    const rz = z - respawnPoint.z;
+    if (rx * rx + rz * rz < 22 ** 2) continue;
+    return { x, z };
+  }
+  return null;
+}
+
+function scatterWorldProps(type, count, occupied, minSpacing) {
+  for (let i = 0; i < count; i += 1) {
+    let pos = null;
+    for (let attempt = 0; attempt < 350; attempt += 1) {
+      const candidate = randomPropPosition();
+      if (!candidate) break;
+      const hasConflict = occupied.some((entry) => {
+        const dx = candidate.x - entry.x;
+        const dz = candidate.z - entry.z;
+        return dx * dx + dz * dz < (entry.spacing + minSpacing) ** 2;
+      });
+      if (!hasConflict) {
+        pos = candidate;
+        break;
+      }
+    }
+    if (!pos) break;
+
+    const prop = createWorldProp(type);
+    const y = sampleHeight(pos.x, pos.z);
+    const scale =
+      type === "tree"
+        ? THREE.MathUtils.randFloat(0.85, 1.35)
+        : type === "rock"
+          ? THREE.MathUtils.randFloat(0.75, 1.6)
+          : THREE.MathUtils.randFloat(0.9, 1.35);
+    prop.position.set(pos.x, y, pos.z);
+    prop.rotation.y = Math.random() * Math.PI * 2;
+    prop.scale.setScalar(scale);
+    scene.add(prop);
+    worldProps.push(prop);
+    occupied.push({ x: pos.x, z: pos.z, spacing: minSpacing * scale });
+  }
+}
+
+function respawnWorldProps() {
+  clearWorldProps();
+  const occupied = [];
+  scatterWorldProps("tree", state.treeCount, occupied, 8);
+  scatterWorldProps("rock", state.rockCount, occupied, 5);
+  scatterWorldProps("metal", state.metalMineCount, occupied, 7);
 }
 
 function randomTorchPosition() {
@@ -982,6 +1136,7 @@ function respawn() {
   state.jumpVel = 0;
   state.move.forward = 0;
   state.move.right = 0;
+  respawnWorldProps();
   respawnAmbientTorches();
 }
 
@@ -1404,10 +1559,10 @@ altitudeButtons.forEach((btn) => {
 });
 
 setAltitude(state.altitudeTarget);
-loadHeightmapUrl(new URL("./heightmap.png", import.meta.url).toString());
 setupPointerLock();
 buildInventory();
 if (heightmapPanel) heightmapPanel.open = false;
 if (inventoryPanel) inventoryPanel.open = false;
+applyHeightmap(createDefaultHeightmap());
 setupMobileControls();
 requestAnimationFrame(animate);
