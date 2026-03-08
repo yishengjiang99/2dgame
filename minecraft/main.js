@@ -129,8 +129,8 @@ function createSkySystem() {
     topColor: { value: new THREE.Color(0x5a8cff) },
     horizonColor: { value: new THREE.Color(0xffc98a) },
     bottomColor: { value: new THREE.Color(0xe6f3ff) },
-    nightTopColor: { value: new THREE.Color(0x06111f) },
-    nightBottomColor: { value: new THREE.Color(0x15243e) },
+    nightTopColor: { value: new THREE.Color(0x10203a) },
+    nightBottomColor: { value: new THREE.Color(0x31476d) },
     sunDirection: { value: new THREE.Vector3(0, 1, 0) },
     moonDirection: { value: new THREE.Vector3(0, -1, 0) },
     dayMix: { value: 1 },
@@ -258,11 +258,11 @@ function updateSky(timeSeconds) {
   scene.fog.color.copy(fogColor);
   renderer.setClearColor(fogColor, 1);
 
-  ambient.intensity = THREE.MathUtils.lerp(0.16, 0.62, daylight);
+  ambient.intensity = THREE.MathUtils.lerp(0.3, 0.62, daylight);
   ambient.color.setRGB(
-    THREE.MathUtils.lerp(0.5, 1, daylight),
-    THREE.MathUtils.lerp(0.56, 0.98, daylight),
-    THREE.MathUtils.lerp(0.72, 0.95, daylight)
+    THREE.MathUtils.lerp(0.62, 1, daylight),
+    THREE.MathUtils.lerp(0.68, 0.98, daylight),
+    THREE.MathUtils.lerp(0.84, 0.95, daylight)
   );
 
   sun.intensity = THREE.MathUtils.lerp(0.08, 1.85, sunStrength);
@@ -273,7 +273,7 @@ function updateSky(timeSeconds) {
   );
   sun.position.copy(sunDirection).multiplyScalar(220);
 
-  moonLight.intensity = THREE.MathUtils.lerp(0.02, 0.28, moonStrength);
+  moonLight.intensity = THREE.MathUtils.lerp(0.1, 0.42, moonStrength);
   moonLight.position.copy(moonDirection).multiplyScalar(180);
 }
 
